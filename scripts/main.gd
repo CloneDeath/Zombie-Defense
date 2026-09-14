@@ -28,6 +28,7 @@ var survivor_spawn := -1
 var survivor_selected := false
 var dragging_survivor := false
 var drag_position := Vector2.ZERO
+var pointer_down_position := Vector2.ZERO
 var fire_cooldown := 0.0
 var survivor_position := Vector2.ZERO
 var survivor_target := Vector2.ZERO
@@ -270,7 +271,7 @@ func _show_results() -> void:
 	queue_redraw()
 
 func _input(event: InputEvent) -> void:
-	if screen != "playing" or survivor_spawn >= 0:
+	if screen != "playing":
 		return
 	if event is InputEventScreenTouch:
 		if event.pressed:
@@ -291,23 +292,40 @@ func _input(event: InputEvent) -> void:
 		queue_redraw()
 
 func _handle_pointer_down(position: Vector2) -> void:
-	if _survivor_card_rect().has_point(position):
+	var touched_available_survivor := survivor_spawn < 0 and _survivor_card_rect().has_point(position)
+	var touched_placed_survivor := survivor_spawn >= 0 and survivor_position.distance_to(position) <= 42.0
+	if touched_available_survivor or touched_placed_survivor:
 		survivor_selected = true
 		dragging_survivor = true
 		drag_position = position
+		pointer_down_position = position
 		queue_redraw()
 	elif survivor_selected:
 		var index := _spawn_point_at(position)
 		if index >= 0:
-			_place_survivor(index)
+			_set_survivor_destination(index)
 
 func _handle_pointer_up(position: Vector2) -> void:
 	if not dragging_survivor:
 		return
 	dragging_survivor = false
-	var index := _spawn_point_at(position)
-	if index >= 0:
+
+	# A short press selects him; a drag orders him immediately.
+	if pointer_down_position.distance_to(position) > 10.0:
+		var index := _spawn_point_at(position)
+		if index >= 0:
+			_set_survivor_destination(index)
+	queue_redraw()
+
+func _set_survivor_destination(index: int) -> void:
+	if survivor_spawn < 0:
 		_place_survivor(index)
+		return
+	survivor_spawn = index
+	survivor_target = _spawn_points()[index]
+	survivor_is_walking = survivor_position.distance_to(survivor_target) > 1.0
+	survivor_selected = false
+	dragging_survivor = false
 	queue_redraw()
 
 func _place_survivor(index: int) -> void:
