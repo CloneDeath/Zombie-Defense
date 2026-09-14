@@ -268,7 +268,7 @@ func _update_zombies(delta: float) -> void:
 			zombie.aim_angle = rotate_toward(zombie.aim_angle, desired_angle, ZOMBIE_TURN_SPEED * delta)
 			if distance > ZOMBIE_ATTACK_RANGE:
 				var direction := zombie_position.direction_to(target_position)
-				var speed := ZOMBIE_CHASE_SPEED * zombie.speed_multiplier * zombie.movement_factor
+				var speed: float = ZOMBIE_CHASE_SPEED * zombie.speed_multiplier * zombie.movement_factor
 				zombie.x += direction.x * speed * delta / _map_size().x
 				zombie.y += direction.y * speed * delta
 			else:
@@ -945,7 +945,7 @@ func _draw() -> void:
 		draw_string(ThemeDB.fallback_font, card.position + Vector2(7, 78), "BATTER • 7m", HORIZONTAL_ALIGNMENT_CENTER, 90, 13, Color.WHITE)
 
 	if dragging_survivor:
-		var drag_texture := SURVIVOR_TEXTURE if dragging_unit == "cop" else BASEBALL_TEXTURE
+		var drag_texture: Texture2D = SURVIVOR_TEXTURE if dragging_unit == "cop" else BASEBALL_TEXTURE
 		draw_texture_rect(drag_texture, Rect2(drag_position - Vector2(38, 32), Vector2(76, 64)), false, Color(1, 1, 1, 0.75))
 
 	if survivor_selected and survivor_spawn >= 0:
