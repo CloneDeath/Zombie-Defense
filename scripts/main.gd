@@ -200,9 +200,10 @@ func _update_wave(delta: float) -> void:
 
 func _spawn_zombie() -> void:
 	var road := _road_rect()
+	var edge_margin := TILE_SIZE * 0.4
 	zombies.append({
 		"x": -0.1,
-		"y": road.position.y + road.size.y * 0.5,
+		"y": randf_range(road.position.y + edge_margin, road.end.y - edge_margin),
 		"hp": ZOMBIE_MAX_HEALTH,
 		"alerted": false,
 		"attack_cooldown": 0.0,
@@ -602,15 +603,14 @@ func _sidewalk_rects() -> Array[Rect2]:
 
 func _spawn_points() -> Array[Vector2]:
 	var road := _road_rect()
-	var sidewalk_width := SIDEWALK_WIDTH_TILES * TILE_SIZE
-	var upper_y := road.position.y - sidewalk_width - TILE_SIZE * 0.5
-	var lower_y := road.end.y + sidewalk_width + TILE_SIZE * 0.5
 	var map_width := _map_size().x
 	return [
-		Vector2(map_width * 0.35, upper_y),
-		Vector2(map_width * 0.65, upper_y),
-		Vector2(map_width * 0.35, lower_y),
-		Vector2(map_width * 0.65, lower_y)
+		# Deliberately staggered: two points overlap the road edge and two sit
+		# mostly on the sidewalks.
+		Vector2(map_width * 0.27, road.position.y + TILE_SIZE * 0.22),
+		Vector2(map_width * 0.64, road.position.y - TILE_SIZE * 0.42),
+		Vector2(map_width * 0.41, road.end.y - TILE_SIZE * 0.18),
+		Vector2(map_width * 0.76, road.end.y + TILE_SIZE * 0.38)
 	]
 
 func _survivor_card_rect() -> Rect2:
