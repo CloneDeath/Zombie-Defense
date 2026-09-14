@@ -32,7 +32,8 @@ jobs:
           cp -r /root/.local/share/godot/export_templates/4.3.stable /github/home/.local/share/godot/export_templates/
       - name: Fetch Kenney Top-down Shooter sprites
         run: |
-          python3 -c "import urllib.request; urllib.request.urlretrieve('https://opengameart.org/sites/default/files/topdown-shooter.zip', '/tmp/kenney.zip')"
+          apt-get update -qq && apt-get install -y -qq curl
+          curl -L "https://opengameart.org/sites/default/files/topdown-shooter.zip" -o /tmp/kenney.zip
           mkdir -p /tmp/kenney assets/kenney
           unzip -q /tmp/kenney.zip -d /tmp/kenney
           find /tmp/kenney -type f -name survivor1_gun.png -exec cp {} assets/kenney/survivor.png \;
