@@ -2,6 +2,7 @@ extends Control
 
 const ZOMBIE_TEXTURE := preload("res://assets/kenney/zombie.png")
 const SURVIVOR_TEXTURE := preload("res://assets/kenney/survivor.png")
+const BASEBALL_TEXTURE := preload("res://assets/kenney/baseball.png")
 const GRASS_TEXTURE := preload("res://assets/kenney/grass.png")
 const ROAD_TEXTURE := preload("res://assets/kenney/road.png")
 const SIDEWALK_TEXTURE := preload("res://assets/kenney/sidewalk.png")
@@ -22,6 +23,13 @@ const ZOMBIE_TURN_SPEED := 0.85
 const GUNSHOT_HEARING_RANGE_METERS := 8.0
 const GUNSHOT_RETARGET_CHANCE := 0.35
 const SURVIVOR_MAX_HEALTH := 10
+const BASEBALL_MAX_HEALTH := 12
+const BASEBALL_ROAM_METERS := 7.0
+const BASEBALL_MELEE_METERS := 0.75
+const BASEBALL_SPEED := 95.0
+const BASEBALL_ATTACK_RATE := 0.8
+const BASEBALL_DAMAGE := 0.5
+const BASEBALL_KNOCKBACK := 34.0
 const ZOMBIE_MAX_HEALTH := 3
 const FIRE_RATE := 0.65
 const MAGAZINE_SIZE := 10
@@ -50,6 +58,18 @@ var wave_delay := 0.5
 var spawn_delay := 0.0
 
 var survivor_spawn := -1
+var cop_kills := 0
+var baseball_spawn := -1
+var baseball_health := BASEBALL_MAX_HEALTH
+var baseball_alive := true
+var baseball_selected := false
+var baseball_position := Vector2.ZERO
+var baseball_target := Vector2.ZERO
+var baseball_is_walking := false
+var baseball_aim_angle := PI
+var baseball_attack_cooldown := 0.0
+var baseball_kills := 0
+var dragging_unit := ""
 var survivor_health := SURVIVOR_MAX_HEALTH
 var survivor_alive := true
 var survivor_selected := false
@@ -172,6 +192,7 @@ func _process(delta: float) -> void:
 	if screen != "playing":
 		return
 	_update_survivor(delta)
+	_update_baseball_survivor(delta)
 
 	for shot in shots.duplicate():
 		shot.life -= delta
@@ -215,7 +236,7 @@ func _spawn_zombie() -> void:
 		"hp": ZOMBIE_MAX_HEALTH,
 		"speed_multiplier": randf_range(0.85, 1.15),
 		"movement_factor": 1.0,
-		"alerted": false,
+		"target_id": "",
 		"attack_cooldown": 0.0,
 		"aim_angle": 0.0
 	})
@@ -227,22 +248,27 @@ func _update_zombies(delta: float) -> void:
 			1.0,
 			ZOMBIE_ACCELERATION * delta
 		)
-		if zombie.alerted and survivor_alive and survivor_spawn >= 0:
+		var target_id := String(zombie.target_id)
+		if target_id != "" and not _survivor_target_alive(target_id):
+			zombie.target_id = ""
+			target_id = ""
+
+		if target_id != "":
 			var zombie_position := _zombie_position(zombie)
-			var distance := zombie_position.distance_to(survivor_position)
-			var desired_angle := zombie_position.angle_to_point(survivor_position)
+			var target_position := _survivor_target_position(target_id)
+			var distance := zombie_position.distance_to(target_position)
+			var desired_angle := zombie_position.angle_to_point(target_position)
 			zombie.aim_angle = rotate_toward(zombie.aim_angle, desired_angle, ZOMBIE_TURN_SPEED * delta)
 			if distance > ZOMBIE_ATTACK_RANGE:
-				var direction := zombie_position.direction_to(survivor_position)
-				zombie.x += direction.x * ZOMBIE_CHASE_SPEED * zombie.speed_multiplier * zombie.movement_factor * delta / _map_size().x
-				zombie.y += direction.y * ZOMBIE_CHASE_SPEED * zombie.speed_multiplier * zombie.movement_factor * delta
+				var direction := zombie_position.direction_to(target_position)
+				var speed := ZOMBIE_CHASE_SPEED * zombie.speed_multiplier * zombie.movement_factor
+				zombie.x += direction.x * speed * delta / _map_size().x
+				zombie.y += direction.y * speed * delta
 			else:
 				zombie.attack_cooldown -= delta
 				if zombie.attack_cooldown <= 0.0:
-					survivor_health -= 1
+					_damage_survivor_target(target_id)
 					zombie.attack_cooldown = ZOMBIE_ATTACK_RATE
-					if survivor_health <= 0:
-						_kill_survivor()
 		else:
 			zombie.aim_angle = rotate_toward(zombie.aim_angle, 0.0, ZOMBIE_TURN_SPEED * delta)
 			zombie.x += ZOMBIE_SPEED * zombie.speed_multiplier * zombie.movement_factor * delta
@@ -257,27 +283,25 @@ func _update_zombies(delta: float) -> void:
 
 	_separate_zombies()
 
-func _separate_zombies() -> void:
-	# Resolve each pair equally so a dense swarm bunches up instead of stacking.
-	var map_width := _map_size().x
-	for i in zombies.size():
-		for j in range(i + 1, zombies.size()):
-			var first: Dictionary = zombies[i]
-			var second: Dictionary = zombies[j]
-			var first_position := _zombie_position(first)
-			var second_position := _zombie_position(second)
-			var difference := second_position - first_position
-			var distance := difference.length()
-			if distance >= ZOMBIE_COLLISION_DIAMETER:
-				continue
-			var direction := difference / distance if distance > 0.001 else Vector2.UP.rotated(randf() * TAU)
-			var correction := direction * (ZOMBIE_COLLISION_DIAMETER - distance) * 0.5
-			first_position -= correction
-			second_position += correction
-			first.x = first_position.x / map_width
-			first.y = first_position.y
-			second.x = second_position.x / map_width
-			second.y = second_position.y
+func _survivor_target_alive(target_id: String) -> bool:
+	if target_id == "cop":
+		return survivor_spawn >= 0 and survivor_alive
+	if target_id == "baseball":
+		return baseball_spawn >= 0 and baseball_alive
+	return false
+
+func _survivor_target_position(target_id: String) -> Vector2:
+	return survivor_position if target_id == "cop" else baseball_position
+
+func _damage_survivor_target(target_id: String) -> void:
+	if target_id == "cop":
+		survivor_health -= 1
+		if survivor_health <= 0:
+			_kill_survivor()
+	elif target_id == "baseball":
+		baseball_health -= 1
+		if baseball_health <= 0:
+			_kill_baseball_survivor()
 
 func _kill_survivor() -> void:
 	survivor_health = 0
@@ -286,7 +310,18 @@ func _kill_survivor() -> void:
 	dragging_survivor = false
 	survivor_is_walking = false
 	for zombie in zombies:
-		zombie.alerted = false
+		if zombie.target_id == "cop":
+			zombie.target_id = ""
+
+func _kill_baseball_survivor() -> void:
+	baseball_health = 0
+	baseball_alive = false
+	baseball_selected = false
+	dragging_survivor = false
+	baseball_is_walking = false
+	for zombie in zombies:
+		if zombie.target_id == "baseball":
+			zombie.target_id = ""
 
 func _update_survivor(delta: float) -> void:
 	if survivor_spawn < 0 or not survivor_alive:
@@ -338,6 +373,73 @@ func _update_survivor(delta: float) -> void:
 	else:
 		survivor_is_walking = false
 
+func _update_baseball_survivor(delta: float) -> void:
+	if baseball_spawn < 0 or not baseball_alive:
+		return
+
+	baseball_target = _spawn_points()[baseball_spawn]
+	baseball_attack_cooldown -= delta
+	var target := _closest_zombie_in_baseball_roam()
+	if not target.is_empty():
+		var target_position := _zombie_position(target)
+		var desired_angle := baseball_position.angle_to_point(target_position)
+		baseball_aim_angle = rotate_toward(baseball_aim_angle, desired_angle, SURVIVOR_TURN_SPEED * delta)
+		var distance := baseball_position.distance_to(target_position)
+		if distance <= BASEBALL_MELEE_METERS * TILE_SIZE:
+			baseball_is_walking = false
+			if baseball_attack_cooldown <= 0.0:
+				_swing_bat(target)
+		else:
+			baseball_is_walking = true
+			baseball_position = baseball_position.move_toward(target_position, BASEBALL_SPEED * delta)
+	else:
+		var distance_home := baseball_position.distance_to(baseball_target)
+		if distance_home > 1.0:
+			baseball_is_walking = true
+			var home_angle := baseball_position.angle_to_point(baseball_target)
+			baseball_aim_angle = rotate_toward(baseball_aim_angle, home_angle, SURVIVOR_TURN_SPEED * delta)
+			baseball_position = baseball_position.move_toward(baseball_target, BASEBALL_SPEED * delta)
+		else:
+			baseball_is_walking = false
+
+func _closest_zombie_in_baseball_roam() -> Dictionary:
+	var closest: Dictionary = {}
+	var closest_distance := INF
+	for zombie in zombies:
+		var zombie_position := _zombie_position(zombie)
+		if zombie_position.distance_to(baseball_target) > BASEBALL_ROAM_METERS * TILE_SIZE:
+			continue
+		var distance := baseball_position.distance_to(zombie_position)
+		if distance < closest_distance:
+			closest = zombie
+			closest_distance = distance
+	return closest
+
+func _swing_bat(target: Dictionary) -> void:
+	if target.is_empty() or not zombies.has(target):
+		return
+	var target_position := _zombie_position(target)
+	if String(target.target_id) == "":
+		target.target_id = "baseball"
+	var knockback_direction := baseball_position.direction_to(target_position)
+	var knocked_position := target_position + knockback_direction * BASEBALL_KNOCKBACK
+	target.x = knocked_position.x / _map_size().x
+	target.y = knocked_position.y
+	target.movement_factor = 0.04
+	target.hp -= BASEBALL_DAMAGE
+	baseball_attack_cooldown = BASEBALL_ATTACK_RATE
+	for i in 4:
+		var direction := Vector2.RIGHT.rotated(randf_range(0.0, TAU))
+		blood_particles.append({
+			"position": target_position + direction * randf_range(2.0, 7.0),
+			"velocity": direction * randf_range(15.0, 45.0),
+			"life": BLOOD_PARTICLE_LIFE * randf_range(0.55, 0.85)
+		})
+	if target.hp <= 0:
+		zombies.erase(target)
+		zombies_killed += 1
+		baseball_kills += 1
+
 func _closest_zombie() -> Dictionary:
 	var closest: Dictionary = {}
 	var closest_distance := INF
@@ -368,18 +470,18 @@ func _shoot(target: Dictionary) -> void:
 			"life": BLOOD_PARTICLE_LIFE * randf_range(0.65, 1.0)
 		})
 	# The zombie that was hit acquires the shooter if it was still wandering.
-	if not target.alerted:
-		target.alerted = true
+	if String(target.target_id) == "":
+		target.target_id = "cop"
 
 	# Other untargeted zombies may hear the shot. Hearing is local and
 	# intentionally unreliable, keeping the whole swarm from turning at once.
 	var hearing_range := GUNSHOT_HEARING_RANGE_METERS * TILE_SIZE
 	for zombie in zombies:
-		if zombie == target or zombie.alerted:
+		if zombie == target or String(zombie.target_id) != "":
 			continue
 		if _zombie_position(zombie).distance_to(survivor_position) <= hearing_range:
 			if randf() <= GUNSHOT_RETARGET_CHANCE:
-				zombie.alerted = true
+				zombie.target_id = "cop"
 
 	var knockback_direction := survivor_position.direction_to(target_position)
 	var knocked_position := target_position + knockback_direction * ZOMBIE_HIT_KNOCKBACK
@@ -391,6 +493,7 @@ func _shoot(target: Dictionary) -> void:
 	if target.hp <= 0:
 		zombies.erase(target)
 		zombies_killed += 1
+		cop_kills += 1
 
 func _start_game() -> void:
 	screen = "playing"
@@ -403,6 +506,18 @@ func _start_game() -> void:
 	wave_delay = 0.5
 	spawn_delay = 0.0
 	survivor_spawn = -1
+	cop_kills = 0
+	baseball_spawn = -1
+	baseball_health = BASEBALL_MAX_HEALTH
+	baseball_alive = true
+	baseball_selected = false
+	baseball_position = Vector2.ZERO
+	baseball_target = Vector2.ZERO
+	baseball_is_walking = false
+	baseball_aim_angle = PI
+	baseball_attack_cooldown = 0.0
+	baseball_kills = 0
+	dragging_unit = ""
 	survivor_health = SURVIVOR_MAX_HEALTH
 	survivor_alive = true
 	survivor_selected = false
@@ -462,6 +577,7 @@ func _input(event: InputEvent) -> void:
 			elif active_touches.size() == 2:
 				map_dragging = false
 				dragging_survivor = false
+				dragging_unit = ""
 				pinch_distance = _touch_distance()
 		else:
 			if active_touches.size() == 1 and dragging_survivor:
@@ -574,19 +690,27 @@ func _screen_to_map(screen_position: Vector2) -> Vector2:
 	return (screen_position - map_offset) / map_zoom
 
 func _handle_pointer_down(position: Vector2) -> bool:
-	var touched_available_survivor := survivor_spawn < 0 and _survivor_card_rect().has_point(position)
-	var touched_placed_survivor := survivor_spawn >= 0 and survivor_alive and _map_to_screen(survivor_position).distance_to(position) <= 42.0
-	if touched_available_survivor or touched_placed_survivor:
-		survivor_selected = true
+	var touched_cop := (
+		(survivor_spawn < 0 and _survivor_card_rect().has_point(position))
+		or (survivor_spawn >= 0 and survivor_alive and _map_to_screen(survivor_position).distance_to(position) <= 42.0)
+	)
+	var touched_baseball := (
+		(baseball_spawn < 0 and _baseball_card_rect().has_point(position))
+		or (baseball_spawn >= 0 and baseball_alive and _map_to_screen(baseball_position).distance_to(position) <= 42.0)
+	)
+	if touched_cop or touched_baseball:
+		dragging_unit = "cop" if touched_cop else "baseball"
+		survivor_selected = touched_cop
+		baseball_selected = touched_baseball
 		dragging_survivor = true
 		drag_position = position
 		pointer_down_position = position
 		queue_redraw()
 		return true
-	elif survivor_selected:
+	elif survivor_selected or baseball_selected:
 		var index := _spawn_point_at(position)
 		if index >= 0:
-			_set_survivor_destination(index)
+			_set_selected_survivor_destination(index)
 			return true
 	return false
 
@@ -594,23 +718,31 @@ func _handle_pointer_up(position: Vector2) -> void:
 	if not dragging_survivor:
 		return
 	dragging_survivor = false
-
-	# A short press selects him; a drag orders him immediately.
 	if pointer_down_position.distance_to(position) > 10.0:
 		var index := _spawn_point_at(position)
 		if index >= 0:
-			_set_survivor_destination(index)
+			_set_selected_survivor_destination(index)
+	dragging_unit = ""
 	queue_redraw()
 
-func _set_survivor_destination(index: int) -> void:
-	if survivor_spawn < 0:
-		_place_survivor(index)
-		return
-	survivor_spawn = index
-	survivor_target = _spawn_points()[index]
-	survivor_is_walking = survivor_position.distance_to(survivor_target) > 1.0
-	survivor_selected = false
+func _set_selected_survivor_destination(index: int) -> void:
+	if survivor_selected:
+		if survivor_spawn < 0:
+			_place_survivor(index)
+		else:
+			survivor_spawn = index
+			survivor_target = _spawn_points()[index]
+			survivor_is_walking = survivor_position.distance_to(survivor_target) > 1.0
+			survivor_selected = false
+	elif baseball_selected:
+		if baseball_spawn < 0:
+			_place_baseball_survivor(index)
+		else:
+			baseball_spawn = index
+			baseball_target = _spawn_points()[index]
+			baseball_selected = false
 	dragging_survivor = false
+	dragging_unit = ""
 	queue_redraw()
 
 func _place_survivor(index: int) -> void:
@@ -622,13 +754,26 @@ func _place_survivor(index: int) -> void:
 	survivor_selected = false
 	dragging_survivor = false
 	fire_cooldown = 0.0
-	queue_redraw()
+
+func _place_baseball_survivor(index: int) -> void:
+	baseball_spawn = index
+	baseball_target = _spawn_points()[index]
+	baseball_position = Vector2(_map_size().x + 55.0, baseball_target.y)
+	baseball_aim_angle = PI
+	baseball_is_walking = true
+	baseball_selected = false
+	dragging_survivor = false
+	baseball_attack_cooldown = 0.0
 
 func _spawn_point_at(position: Vector2) -> int:
 	position = _screen_to_map(position)
 	var points := _spawn_points()
 	for i in points.size():
-		if points[i].distance_to(position) <= 38.0:
+		var occupied_by_other := (
+			(i == survivor_spawn and baseball_selected)
+			or (i == baseball_spawn and survivor_selected)
+		)
+		if not occupied_by_other and points[i].distance_to(position) <= 38.0:
 			return i
 	return -1
 
@@ -670,7 +815,10 @@ func _spawn_points() -> Array[Vector2]:
 	]
 
 func _survivor_card_rect() -> Rect2:
-	return Rect2(size.x * 0.5 - 52, size.y - 105, 104, 92)
+	return Rect2(size.x * 0.5 - 112, size.y - 105, 104, 92)
+
+func _baseball_card_rect() -> Rect2:
+	return Rect2(size.x * 0.5 + 8, size.y - 105, 104, 92)
 
 func _zombie_position(zombie: Dictionary) -> Vector2:
 	return Vector2(zombie.x * _map_size().x, zombie.y)
@@ -705,8 +853,9 @@ func _draw() -> void:
 	var points := _spawn_points()
 	for i in points.size():
 		var point := _map_to_screen(points[i])
-		var occupied := i == survivor_spawn
-		var point_color := Color("#d9ba58") if survivor_selected and not occupied else Color("#78917a")
+		var occupied := i == survivor_spawn or i == baseball_spawn
+		var choosing := survivor_selected or baseball_selected
+		var point_color := Color("#d9ba58") if choosing and not occupied else Color("#78917a")
 		draw_circle(point, 30 * map_zoom, Color(point_color, 0.35))
 		draw_arc(point, 30 * map_zoom, 0, TAU, 32, point_color, 3)
 		if not occupied:
@@ -739,6 +888,22 @@ func _draw() -> void:
 		draw_rect(Rect2(survivor_bar, Vector2(56, 6)), Color("#251f1f"))
 		draw_rect(Rect2(survivor_bar, Vector2(56.0 * survivor_health / SURVIVOR_MAX_HEALTH, 6)), Color("#63d471"))
 
+	if baseball_spawn >= 0:
+		var baseball_screen := _map_to_screen(baseball_position)
+		if baseball_alive and baseball_selected:
+			var home_screen := _map_to_screen(baseball_target)
+			draw_circle(home_screen, BASEBALL_ROAM_METERS * TILE_SIZE * map_zoom, Color(0.25, 0.55, 1.0, 0.06))
+			draw_arc(home_screen, BASEBALL_ROAM_METERS * TILE_SIZE * map_zoom, 0, TAU, 64, Color(0.25, 0.55, 1.0, 0.22), 2)
+		draw_set_transform(baseball_screen, baseball_aim_angle, Vector2(map_zoom, map_zoom))
+		var baseball_color := Color.WHITE if baseball_alive else Color(0.35, 0.35, 0.35, 1.0)
+		draw_texture_rect(BASEBALL_TEXTURE, Rect2(Vector2(-34, -30), Vector2(68, 60)), false, baseball_color)
+		draw_line(Vector2(12, 0), Vector2(49, 0), Color("#b98245"), 8.0)
+		draw_circle(Vector2(49, 0), 5.0, Color("#d1a063"))
+		draw_set_transform(Vector2.ZERO, 0.0)
+		var baseball_bar := baseball_screen + Vector2(-28, -40)
+		draw_rect(Rect2(baseball_bar, Vector2(56, 6)), Color("#251f1f"))
+		draw_rect(Rect2(baseball_bar, Vector2(56.0 * baseball_health / BASEBALL_MAX_HEALTH, 6)), Color("#63d471"))
+
 	for zombie in zombies:
 		var zombie_position := _map_to_screen(_zombie_position(zombie))
 		draw_set_transform(zombie_position, zombie.aim_angle, Vector2(map_zoom, map_zoom))
@@ -762,13 +927,24 @@ func _draw() -> void:
 		draw_rect(card, card_color)
 		draw_rect(card, Color("#9fba9e"), false, 2)
 		draw_texture_rect(SURVIVOR_TEXTURE, Rect2(card.position + Vector2(23, 5), Vector2(58, 49)), false)
-		draw_string(ThemeDB.fallback_font, card.position + Vector2(10, 78), "SURVIVOR • 5m", HORIZONTAL_ALIGNMENT_CENTER, 84, 13, Color.WHITE)
+		draw_string(ThemeDB.fallback_font, card.position + Vector2(10, 78), "COP • 5m", HORIZONTAL_ALIGNMENT_CENTER, 84, 13, Color.WHITE)
+
+	if baseball_spawn < 0:
+		var card := _baseball_card_rect()
+		var card_color := Color("#7188a4") if baseball_selected else Color("#35465a")
+		draw_rect(card, card_color)
+		draw_rect(card, Color("#9fb9d2"), false, 2)
+		draw_texture_rect(BASEBALL_TEXTURE, Rect2(card.position + Vector2(23, 5), Vector2(58, 49)), false)
+		draw_string(ThemeDB.fallback_font, card.position + Vector2(7, 78), "BATTER • 7m", HORIZONTAL_ALIGNMENT_CENTER, 90, 13, Color.WHITE)
 
 	if dragging_survivor:
-		draw_texture_rect(SURVIVOR_TEXTURE, Rect2(drag_position - Vector2(38, 32), Vector2(76, 64)), false, Color(1, 1, 1, 0.75))
+		var drag_texture := SURVIVOR_TEXTURE if dragging_unit == "cop" else BASEBALL_TEXTURE
+		draw_texture_rect(drag_texture, Rect2(drag_position - Vector2(38, 32), Vector2(76, 64)), false, Color(1, 1, 1, 0.75))
 
 	if survivor_selected and survivor_spawn >= 0:
 		_draw_survivor_info_panel()
+	elif baseball_selected and baseball_spawn >= 0:
+		_draw_baseball_info_panel()
 
 func _draw_survivor_info_panel() -> void:
 	var panel_size := Vector2(260, 142)
@@ -794,4 +970,19 @@ func _draw_survivor_info_panel() -> void:
 	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 58), "POLICE OFFICER", HORIZONTAL_ALIGNMENT_LEFT, 145, 14, Color("#83c7ff"))
 	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 82), "HEALTH  %d / %d" % [survivor_health, SURVIVOR_MAX_HEALTH], HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
 	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 104), "AMMO    %s" % status, HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
-	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 126), "KILLS   %d" % zombies_killed, HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 126), "KILLS   %d" % cop_kills, HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
+
+func _draw_baseball_info_panel() -> void:
+	var panel_size := Vector2(260, 142)
+	var panel_position := Vector2(14, size.y - panel_size.y - 14)
+	var panel := Rect2(panel_position, panel_size)
+	draw_rect(panel, Color(0.05, 0.045, 0.035, 0.92))
+	draw_rect(panel, Color(0.82, 0.55, 0.27, 0.9), false, 2.0)
+	var portrait := Rect2(panel_position + Vector2(12, 36), Vector2(76, 76))
+	draw_rect(portrait, Color(0.18, 0.13, 0.08, 1.0))
+	draw_texture_rect(BASEBALL_TEXTURE, portrait, false)
+	draw_string(ThemeDB.fallback_font, panel_position + Vector2(12, 25), "CASEY MORGAN", HORIZONTAL_ALIGNMENT_LEFT, 220, 20, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 58), "BASEBALL PLAYER", HORIZONTAL_ALIGNMENT_LEFT, 145, 14, Color("#f0b96f"))
+	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 82), "HEALTH  %d / %d" % [baseball_health, BASEBALL_MAX_HEALTH], HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 104), "WEAPON  BAT", HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 126), "KILLS   %d" % baseball_kills, HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
