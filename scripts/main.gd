@@ -28,6 +28,7 @@ const BASEBALL_ROAM_METERS := 7.0
 const BASEBALL_MELEE_METERS := 0.75
 const BASEBALL_WAIT_DISTANCE_METERS := 1.5
 const BASEBALL_SPEED := 95.0
+const BASEBALL_RECHARGE_SPEED := 42.0
 const BASEBALL_ATTACK_RATE := 0.8
 const BASEBALL_DAMAGE := 0.5
 const BASEBALL_KNOCKBACK_SPEED := 420.0
@@ -62,8 +63,16 @@ var wave_delay := 0.5
 var spawn_delay := 0.0
 
 var survivor_spawn := -1
+var survivor_max_health := SURVIVOR_MAX_HEALTH
+var cop_level := 1
+var cop_xp := 0
+var cop_xp_to_next := 3
 var cop_kills := 0
 var baseball_spawn := -1
+var baseball_max_health := BASEBALL_MAX_HEALTH
+var baseball_level := 1
+var baseball_xp := 0
+var baseball_xp_to_next := 3
 var baseball_health := BASEBALL_MAX_HEALTH
 var baseball_alive := true
 var baseball_selected := false
@@ -434,7 +443,7 @@ func _update_baseball_survivor(delta: float) -> void:
 			if distance < wait_distance:
 				baseball_is_walking = true
 				var retreat_direction := target_position.direction_to(baseball_position)
-				var next_position := baseball_position + retreat_direction * BASEBALL_SPEED * delta
+				var next_position := baseball_position + retreat_direction * BASEBALL_RECHARGE_SPEED * delta
 				var max_roam := BASEBALL_ROAM_METERS * TILE_SIZE
 				if next_position.distance_to(baseball_target) <= max_roam:
 					baseball_position = next_position
@@ -498,6 +507,7 @@ func _swing_bat(target: Dictionary) -> void:
 			zombies.erase(zombie)
 			zombies_killed += 1
 			baseball_kills += 1
+			_award_baseball_xp()
 
 	# The impact can also draw nearby, untargeted zombies toward the batter.
 	var hearing_range := GUNSHOT_HEARING_RANGE_METERS * TILE_SIZE
@@ -562,6 +572,25 @@ func _shoot(target: Dictionary) -> void:
 		zombies.erase(target)
 		zombies_killed += 1
 		cop_kills += 1
+		_award_cop_xp()
+
+func _award_cop_xp() -> void:
+	cop_xp += 1
+	if cop_xp >= cop_xp_to_next:
+		cop_xp -= cop_xp_to_next
+		cop_level += 1
+		cop_xp_to_next = cop_level * 3
+		survivor_max_health += 2
+		survivor_health = survivor_max_health
+
+func _award_baseball_xp() -> void:
+	baseball_xp += 1
+	if baseball_xp >= baseball_xp_to_next:
+		baseball_xp -= baseball_xp_to_next
+		baseball_level += 1
+		baseball_xp_to_next = baseball_level * 3
+		baseball_max_health += 2
+		baseball_health = baseball_max_health
 
 func _start_game() -> void:
 	screen = "playing"
@@ -574,8 +603,16 @@ func _start_game() -> void:
 	wave_delay = 0.5
 	spawn_delay = 0.0
 	survivor_spawn = -1
+	survivor_max_health = SURVIVOR_MAX_HEALTH
+	cop_level = 1
+	cop_xp = 0
+	cop_xp_to_next = 3
 	cop_kills = 0
 	baseball_spawn = -1
+	baseball_max_health = BASEBALL_MAX_HEALTH
+	baseball_level = 1
+	baseball_xp = 0
+	baseball_xp_to_next = 3
 	baseball_health = BASEBALL_MAX_HEALTH
 	baseball_alive = true
 	baseball_selected = false
@@ -955,7 +992,7 @@ func _draw() -> void:
 		draw_set_transform(Vector2.ZERO, 0.0)
 		var survivor_bar := survivor_screen + Vector2(-28, -42)
 		draw_rect(Rect2(survivor_bar, Vector2(56, 6)), Color("#251f1f"))
-		draw_rect(Rect2(survivor_bar, Vector2(56.0 * survivor_health / SURVIVOR_MAX_HEALTH, 6)), Color("#63d471"))
+		draw_rect(Rect2(survivor_bar, Vector2(56.0 * survivor_health / survivor_max_health, 6)), Color("#63d471"))
 
 	if baseball_spawn >= 0:
 		var baseball_screen := _map_to_screen(baseball_position)
@@ -977,7 +1014,7 @@ func _draw() -> void:
 		draw_set_transform(Vector2.ZERO, 0.0)
 		var baseball_bar := baseball_screen + Vector2(-28, -40)
 		draw_rect(Rect2(baseball_bar, Vector2(56, 6)), Color("#251f1f"))
-		draw_rect(Rect2(baseball_bar, Vector2(56.0 * baseball_health / BASEBALL_MAX_HEALTH, 6)), Color("#63d471"))
+		draw_rect(Rect2(baseball_bar, Vector2(56.0 * baseball_health / baseball_max_health, 6)), Color("#63d471"))
 
 	for zombie in zombies:
 		var zombie_position := _map_to_screen(_zombie_position(zombie))
@@ -1022,7 +1059,7 @@ func _draw() -> void:
 		_draw_baseball_info_panel()
 
 func _draw_survivor_info_panel() -> void:
-	var panel_size := Vector2(260, 142)
+	var panel_size := Vector2(260, 158)
 	var panel_position := Vector2(14, size.y - panel_size.y - 14)
 	var panel := Rect2(panel_position, panel_size)
 	draw_rect(panel, Color(0.035, 0.055, 0.08, 0.92))
@@ -1042,13 +1079,14 @@ func _draw_survivor_info_panel() -> void:
 		Color.WHITE
 	)
 	var status := "RELOADING" if is_reloading else "%d / %d" % [ammo, MAGAZINE_SIZE]
-	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 58), "POLICE OFFICER", HORIZONTAL_ALIGNMENT_LEFT, 145, 14, Color("#83c7ff"))
-	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 82), "HEALTH  %d / %d" % [survivor_health, SURVIVOR_MAX_HEALTH], HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
-	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 104), "AMMO    %s" % status, HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
-	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 126), "KILLS   %d" % cop_kills, HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 52), "POLICE OFFICER", HORIZONTAL_ALIGNMENT_LEFT, 145, 14, Color("#83c7ff"))
+	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 74), "LEVEL   %d  XP %d/%d" % [cop_level, cop_xp, cop_xp_to_next], HORIZONTAL_ALIGNMENT_LEFT, 150, 15, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 96), "HEALTH  %d / %d" % [survivor_health, survivor_max_health], HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 118), "AMMO    %s" % status, HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 140), "KILLS   %d" % cop_kills, HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
 
 func _draw_baseball_info_panel() -> void:
-	var panel_size := Vector2(260, 142)
+	var panel_size := Vector2(260, 158)
 	var panel_position := Vector2(14, size.y - panel_size.y - 14)
 	var panel := Rect2(panel_position, panel_size)
 	draw_rect(panel, Color(0.05, 0.045, 0.035, 0.92))
@@ -1057,7 +1095,8 @@ func _draw_baseball_info_panel() -> void:
 	draw_rect(portrait, Color(0.18, 0.13, 0.08, 1.0))
 	draw_texture_rect(BASEBALL_TEXTURE, portrait, false)
 	draw_string(ThemeDB.fallback_font, panel_position + Vector2(12, 25), "CASEY MORGAN", HORIZONTAL_ALIGNMENT_LEFT, 220, 20, Color.WHITE)
-	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 58), "BASEBALL PLAYER", HORIZONTAL_ALIGNMENT_LEFT, 145, 14, Color("#f0b96f"))
-	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 82), "HEALTH  %d / %d" % [baseball_health, BASEBALL_MAX_HEALTH], HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
-	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 104), "WEAPON  BAT", HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
-	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 126), "KILLS   %d" % baseball_kills, HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 52), "BASEBALL PLAYER", HORIZONTAL_ALIGNMENT_LEFT, 145, 14, Color("#f0b96f"))
+	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 74), "LEVEL   %d  XP %d/%d" % [baseball_level, baseball_xp, baseball_xp_to_next], HORIZONTAL_ALIGNMENT_LEFT, 150, 15, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 96), "HEALTH  %d / %d" % [baseball_health, baseball_max_health], HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 118), "WEAPON  BAT", HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 140), "KILLS   %d" % baseball_kills, HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
