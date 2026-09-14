@@ -169,7 +169,8 @@ func _spawn_zombie() -> void:
 		"y": road.position.y + road.size.y * 0.5,
 		"hp": ZOMBIE_MAX_HEALTH,
 		"alerted": false,
-		"attack_cooldown": 0.0
+		"attack_cooldown": 0.0,
+		"aim_angle": 0.0
 	})
 
 func _update_zombies(delta: float) -> void:
@@ -177,6 +178,8 @@ func _update_zombies(delta: float) -> void:
 		if zombie.alerted and survivor_alive and survivor_spawn >= 0:
 			var zombie_position := _zombie_position(zombie)
 			var distance := zombie_position.distance_to(survivor_position)
+			var desired_angle := zombie_position.angle_to_point(survivor_position)
+			zombie.aim_angle = rotate_toward(zombie.aim_angle, desired_angle, SURVIVOR_TURN_SPEED * delta)
 			if distance > ZOMBIE_ATTACK_RANGE:
 				var direction := zombie_position.direction_to(survivor_position)
 				zombie.x += direction.x * ZOMBIE_CHASE_SPEED * delta / size.x
@@ -189,6 +192,7 @@ func _update_zombies(delta: float) -> void:
 					if survivor_health <= 0:
 						_kill_survivor()
 		else:
+			zombie.aim_angle = rotate_toward(zombie.aim_angle, 0.0, SURVIVOR_TURN_SPEED * delta)
 			zombie.x += ZOMBIE_SPEED * delta
 
 		if zombie.x > 1.08:
@@ -449,7 +453,9 @@ func _draw() -> void:
 
 	for zombie in zombies:
 		var zombie_position := _zombie_position(zombie)
-		draw_texture_rect(ZOMBIE_TEXTURE, Rect2(zombie_position - Vector2(30, 39), Vector2(60, 78)), false)
+		draw_set_transform(zombie_position, zombie.aim_angle)
+		draw_texture_rect(ZOMBIE_TEXTURE, Rect2(Vector2(-30, -39), Vector2(60, 78)), false)
+		draw_set_transform(Vector2.ZERO, 0.0)
 		var bar_position := zombie_position + Vector2(-25, -47)
 		draw_rect(Rect2(bar_position, Vector2(50, 6)), Color("#251f1f"))
 		draw_rect(Rect2(bar_position, Vector2(50.0 * zombie.hp / ZOMBIE_MAX_HEALTH, 6)), Color("#d85a55"))
