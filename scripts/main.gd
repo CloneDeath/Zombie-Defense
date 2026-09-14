@@ -6,9 +6,9 @@ const GRASS_TEXTURE := preload("res://assets/kenney/grass.png")
 const ROAD_TEXTURE := preload("res://assets/kenney/road.png")
 const SIDEWALK_TEXTURE := preload("res://assets/kenney/sidewalk.png")
 const STARTING_HEALTH := 10
-const MAP_WIDTH_SCALE := 1.45
-const MAP_HEIGHT_SCALE := 1.30
-const MAP_OVERSCAN := 220.0
+const TILE_SIZE := 64.0
+const MAP_SIZE_TILES := 20
+const MAP_OVERSCAN := TILE_SIZE * 3.0
 const CAMERA_SPRING_SPEED := 11.0
 const OVERSCROLL_RESISTANCE := 0.32
 const ZOMBIE_SPEED := 0.069
@@ -23,9 +23,8 @@ const RELOAD_TIME := 1.8
 const EARLY_RELOAD_AT := 5
 const BLOOD_PARTICLE_LIFE := 0.45
 const SURVIVOR_SPEED := 120.0
-const MAP_WIDTH_METERS := 12.0
-const STREET_WIDTH_METERS := 6.0
-const SIDEWALK_WIDTH_METERS := 0.75
+const STREET_WIDTH_TILES := 6
+const SIDEWALK_WIDTH_TILES := 1
 const SURVIVOR_RANGE_METERS := 3.0
 const SURVIVOR_AWARENESS_MULTIPLIER := 2.0
 const SURVIVOR_TURN_SPEED := 2.4
@@ -351,9 +350,9 @@ func _start_game() -> void:
 	survivor_aim_angle = PI
 	shots.clear()
 	blood_particles.clear()
-	map_offset = Vector2.ZERO
-	map_dragging = false
 	map_zoom = 1.0
+	map_offset = _centered_map_offset()
+	map_dragging = false
 	active_touches.clear()
 	title_label.hide()
 	results_label.hide()
@@ -495,6 +494,15 @@ func _clamped_map_offset(offset: Vector2) -> Vector2:
 		clampf(offset.y, bounds.min_y, bounds.max_y)
 	)
 
+func _centered_map_offset() -> Vector2:
+	var map_pixels := _map_size() * map_zoom
+	var top := 78.0
+	var bottom := size.y - 112.0
+	return _clamped_map_offset(Vector2(
+		(size.x - map_pixels.x) * 0.5,
+		top + (bottom - top - map_pixels.y) * 0.5
+	))
+
 func _map_to_screen(map_position: Vector2) -> Vector2:
 	return map_position * map_zoom + map_offset
 
@@ -561,32 +569,25 @@ func _spawn_point_at(position: Vector2) -> int:
 	return -1
 
 func _map_size() -> Vector2:
-	return Vector2(size.x * MAP_WIDTH_SCALE, size.y * MAP_HEIGHT_SCALE)
+	var side := MAP_SIZE_TILES * TILE_SIZE
+	return Vector2(side, side)
 
 func _field_rect() -> Rect2:
-	var map_size := _map_size()
-	return Rect2(0, 90, map_size.x, maxf(160.0, map_size.y - 205.0))
-
-func _pixels_per_meter() -> float:
-	return _map_size().x / MAP_WIDTH_METERS
+	return Rect2(Vector2.ZERO, _map_size())
 
 func _road_rect() -> Rect2:
-	var field := _field_rect()
-	var sidewalk_width := SIDEWALK_WIDTH_METERS * _pixels_per_meter()
-	var road_height := minf(
-		STREET_WIDTH_METERS * _pixels_per_meter(),
-		maxf(96.0, field.size.y - sidewalk_width * 2.0 - 48.0)
-	)
+	var map_size := _map_size()
+	var road_height := STREET_WIDTH_TILES * TILE_SIZE
 	return Rect2(
 		-MAP_OVERSCAN,
-		field.position.y + (field.size.y - road_height) * 0.5,
-		_map_size().x + MAP_OVERSCAN * 2.0,
+		(map_size.y - road_height) * 0.5,
+		map_size.x + MAP_OVERSCAN * 2.0,
 		road_height
 	)
 
 func _sidewalk_rects() -> Array[Rect2]:
 	var road := _road_rect()
-	var sidewalk_width := SIDEWALK_WIDTH_METERS * _pixels_per_meter()
+	var sidewalk_width := SIDEWALK_WIDTH_TILES * TILE_SIZE
 	return [
 		Rect2(road.position.x, road.position.y - sidewalk_width, road.size.x, sidewalk_width),
 		Rect2(road.position.x, road.end.y, road.size.x, sidewalk_width)
@@ -594,8 +595,9 @@ func _sidewalk_rects() -> Array[Rect2]:
 
 func _spawn_points() -> Array[Vector2]:
 	var road := _road_rect()
-	var upper_y := maxf(_field_rect().position.y + 32.0, road.position.y - 34.0)
-	var lower_y := minf(_field_rect().end.y - 32.0, road.end.y + 34.0)
+	var sidewalk_width := SIDEWALK_WIDTH_TILES * TILE_SIZE
+	var upper_y := road.position.y - sidewalk_width - TILE_SIZE * 0.5
+	var lower_y := road.end.y + sidewalk_width + TILE_SIZE * 0.5
 	var map_width := _map_size().x
 	return [
 		Vector2(map_width * 0.35, upper_y),
@@ -611,7 +613,7 @@ func _zombie_position(zombie: Dictionary) -> Vector2:
 	return Vector2(zombie.x * _map_size().x, zombie.y)
 
 func _survivor_range() -> float:
-	return size.x / MAP_WIDTH_METERS * SURVIVOR_RANGE_METERS
+	return SURVIVOR_RANGE_METERS * TILE_SIZE
 
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), Color("#111812"))
