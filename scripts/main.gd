@@ -3,7 +3,9 @@ extends Control
 const ZOMBIE_TEXTURE := preload("res://assets/kenney/zombie.png")
 const SURVIVOR_TEXTURE := preload("res://assets/kenney/survivor.png")
 const STARTING_HEALTH := 10
-const ZOMBIE_SPEED := 0.10
+const MAP_WIDTH_SCALE := 1.45
+const MAP_HEIGHT_SCALE := 1.30
+const ZOMBIE_SPEED := 0.069
 const ZOMBIE_CHASE_SPEED := 55.0
 const ZOMBIE_ATTACK_RANGE := 34.0
 const ZOMBIE_ATTACK_RATE := 0.8
@@ -445,7 +447,7 @@ func _set_survivor_destination(index: int) -> void:
 func _place_survivor(index: int) -> void:
 	survivor_spawn = index
 	survivor_target = _spawn_points()[index]
-	survivor_position = Vector2(size.x + 55.0, survivor_target.y)
+	survivor_position = Vector2(_map_size().x + 55.0, survivor_target.y)
 	survivor_aim_angle = PI
 	survivor_is_walking = true
 	survivor_selected = false
@@ -461,30 +463,35 @@ func _spawn_point_at(position: Vector2) -> int:
 			return i
 	return -1
 
+func _map_size() -> Vector2:
+	return Vector2(size.x * MAP_WIDTH_SCALE, size.y * MAP_HEIGHT_SCALE)
+
 func _field_rect() -> Rect2:
-	return Rect2(0, 90, size.x, maxf(160.0, size.y - 205.0))
+	var map_size := _map_size()
+	return Rect2(0, 90, map_size.x, maxf(160.0, map_size.y - 205.0))
 
 func _road_rect() -> Rect2:
 	var field := _field_rect()
 	var road_height := minf(135.0, field.size.y * 0.48)
-	return Rect2(0, field.position.y + (field.size.y - road_height) * 0.5, size.x, road_height)
+	return Rect2(0, field.position.y + (field.size.y - road_height) * 0.5, _map_size().x, road_height)
 
 func _spawn_points() -> Array[Vector2]:
 	var road := _road_rect()
 	var upper_y := maxf(_field_rect().position.y + 32.0, road.position.y - 34.0)
 	var lower_y := minf(_field_rect().end.y - 32.0, road.end.y + 34.0)
+	var map_width := _map_size().x
 	return [
-		Vector2(size.x * 0.35, upper_y),
-		Vector2(size.x * 0.65, upper_y),
-		Vector2(size.x * 0.35, lower_y),
-		Vector2(size.x * 0.65, lower_y)
+		Vector2(map_width * 0.35, upper_y),
+		Vector2(map_width * 0.65, upper_y),
+		Vector2(map_width * 0.35, lower_y),
+		Vector2(map_width * 0.65, lower_y)
 	]
 
 func _survivor_card_rect() -> Rect2:
 	return Rect2(size.x * 0.5 - 52, size.y - 105, 104, 92)
 
 func _zombie_position(zombie: Dictionary) -> Vector2:
-	return Vector2(zombie.x * size.x, zombie.y)
+	return Vector2(zombie.x * _map_size().x, zombie.y)
 
 func _survivor_range() -> float:
 	return size.x / MAP_WIDTH_METERS * SURVIVOR_RANGE_METERS
@@ -498,8 +505,8 @@ func _draw() -> void:
 	var road := _road_rect()
 	draw_rect(Rect2(_map_to_screen(field.position), field.size * map_zoom), Color("#334a35"))
 	draw_rect(Rect2(_map_to_screen(road.position), road.size * map_zoom), Color("#5b5a50"))
-	draw_line(_map_to_screen(Vector2(0, road.position.y)), _map_to_screen(Vector2(size.x, road.position.y)), Color("#7b795f"), 4)
-	draw_line(_map_to_screen(Vector2(0, road.end.y)), _map_to_screen(Vector2(size.x, road.end.y)), Color("#7b795f"), 4)
+	draw_line(_map_to_screen(Vector2(0, road.position.y)), _map_to_screen(Vector2(_map_size().x, road.position.y)), Color("#7b795f"), 4)
+	draw_line(_map_to_screen(Vector2(0, road.end.y)), _map_to_screen(Vector2(_map_size().x, road.end.y)), Color("#7b795f"), 4)
 
 	var points := _spawn_points()
 	for i in points.size():
