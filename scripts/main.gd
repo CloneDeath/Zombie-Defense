@@ -5,6 +5,9 @@ const SURVIVOR_TEXTURE := preload("res://assets/kenney/survivor.png")
 const STARTING_HEALTH := 10
 const MAP_WIDTH_SCALE := 1.45
 const MAP_HEIGHT_SCALE := 1.30
+const MAP_OVERSCAN := 220.0
+const CAMERA_SPRING_SPEED := 11.0
+const OVERSCROLL_RESISTANCE := 0.32
 const ZOMBIE_SPEED := 0.069
 const ZOMBIE_CHASE_SPEED := 55.0
 const ZOMBIE_ATTACK_RANGE := 34.0
@@ -139,6 +142,10 @@ func _layout_ui() -> void:
 func _process(delta: float) -> void:
 	if screen != "playing":
 		return
+
+	if not map_dragging and active_touches.size() < 2:
+		var resting_offset := _clamped_map_offset(map_offset)
+		map_offset = map_offset.lerp(resting_offset, 1.0 - exp(-CAMERA_SPRING_SPEED * delta))
 
 	_update_wave(delta)
 	_update_zombies(delta)
@@ -360,7 +367,7 @@ func _input(event: InputEvent) -> void:
 		elif dragging_survivor:
 			drag_position = event.position
 		elif map_dragging:
-			map_offset += event.position - map_drag_position
+			_pan_map(event.position - map_drag_position)
 			map_drag_position = event.position
 		queue_redraw()
 	elif event is InputEventMouseButton:
@@ -380,7 +387,7 @@ func _input(event: InputEvent) -> void:
 		if dragging_survivor:
 			drag_position = event.position
 		elif map_dragging:
-			map_offset += event.position - map_drag_position
+			_pan_map(event.position - map_drag_position)
 			map_drag_position = event.position
 		queue_redraw()
 
@@ -394,9 +401,46 @@ func _touch_center() -> Vector2:
 
 func _zoom_at(screen_position: Vector2, new_zoom: float) -> void:
 	var map_position := _screen_to_map(screen_position)
-	map_zoom = clampf(new_zoom, 0.55, 2.0)
+	map_zoom = clampf(new_zoom, _minimum_zoom(), 2.0)
 	map_offset = screen_position - map_position * map_zoom
 	queue_redraw()
+
+func _pan_map(delta: Vector2) -> void:
+	var bounds := _map_offset_bounds()
+	var adjusted := delta
+	if (map_offset.x > bounds.max_x and delta.x > 0.0) or (map_offset.x < bounds.min_x and delta.x < 0.0):
+		adjusted.x *= OVERSCROLL_RESISTANCE
+	if (map_offset.y > bounds.max_y and delta.y > 0.0) or (map_offset.y < bounds.min_y and delta.y < 0.0):
+		adjusted.y *= OVERSCROLL_RESISTANCE
+	map_offset += adjusted
+
+func _minimum_zoom() -> float:
+	var playable_height := maxf(1.0, size.y - 190.0)
+	var map_size := _map_size()
+	return maxf(size.x / map_size.x, playable_height / map_size.y)
+
+func _map_offset_bounds() -> Dictionary:
+	var map_size := _map_size() * map_zoom
+	var top := 78.0
+	var bottom := size.y - 112.0
+	var min_x := size.x - map_size.x
+	var max_x := 0.0
+	var min_y := bottom - map_size.y
+	var max_y := top
+	if min_x > max_x:
+		min_x = (size.x - map_size.x) * 0.5
+		max_x = min_x
+	if min_y > max_y:
+		min_y = top + (bottom - top - map_size.y) * 0.5
+		max_y = min_y
+	return {"min_x":min_x, "max_x":max_x, "min_y":min_y, "max_y":max_y}
+
+func _clamped_map_offset(offset: Vector2) -> Vector2:
+	var bounds := _map_offset_bounds()
+	return Vector2(
+		clampf(offset.x, bounds.min_x, bounds.max_x),
+		clampf(offset.y, bounds.min_y, bounds.max_y)
+	)
 
 func _map_to_screen(map_position: Vector2) -> Vector2:
 	return map_position * map_zoom + map_offset
@@ -500,6 +544,15 @@ func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), Color("#111812"))
 	if screen != "playing":
 		return
+
+	var map_size := _map_size()
+	draw_rect(
+		Rect2(
+			_map_to_screen(Vector2(-MAP_OVERSCAN, -MAP_OVERSCAN)),
+			(map_size + Vector2.ONE * MAP_OVERSCAN * 2.0) * map_zoom
+		),
+		Color("#334a35")
+	)
 
 	var field := _field_rect()
 	var road := _road_rect()
