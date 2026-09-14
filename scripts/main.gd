@@ -29,7 +29,9 @@ const BASEBALL_MELEE_METERS := 0.75
 const BASEBALL_SPEED := 95.0
 const BASEBALL_ATTACK_RATE := 0.8
 const BASEBALL_DAMAGE := 0.5
-const BASEBALL_KNOCKBACK := 34.0
+const BASEBALL_KNOCKBACK := 72.0
+const BASEBALL_AOE_METERS := 1.15
+const BASEBALL_SWING_DURATION := 0.28
 const ZOMBIE_MAX_HEALTH := 3
 const FIRE_RATE := 0.65
 const MAGAZINE_SIZE := 10
@@ -68,6 +70,7 @@ var baseball_target := Vector2.ZERO
 var baseball_is_walking := false
 var baseball_aim_angle := PI
 var baseball_attack_cooldown := 0.0
+var baseball_swing_time := 0.0
 var baseball_kills := 0
 var dragging_unit := ""
 var survivor_health := SURVIVOR_MAX_HEALTH
@@ -407,6 +410,7 @@ func _update_baseball_survivor(delta: float) -> void:
 
 	baseball_target = _spawn_points()[baseball_spawn]
 	baseball_attack_cooldown -= delta
+	baseball_swing_time = maxf(0.0, baseball_swing_time - delta)
 	var target := _closest_zombie_in_baseball_roam()
 	if not target.is_empty():
 		var target_position := _zombie_position(target)
@@ -446,27 +450,34 @@ func _closest_zombie_in_baseball_roam() -> Dictionary:
 func _swing_bat(target: Dictionary) -> void:
 	if target.is_empty() or not zombies.has(target):
 		return
-	var target_position := _zombie_position(target)
-	if String(target.target_id) == "":
-		target.target_id = "baseball"
-	var knockback_direction := baseball_position.direction_to(target_position)
-	var knocked_position := target_position + knockback_direction * BASEBALL_KNOCKBACK
-	target.x = knocked_position.x / _map_size().x
-	target.y = knocked_position.y
-	target.movement_factor = 0.04
-	target.hp -= BASEBALL_DAMAGE
 	baseball_attack_cooldown = BASEBALL_ATTACK_RATE
-	for i in 4:
-		var direction := Vector2.RIGHT.rotated(randf_range(0.0, TAU))
-		blood_particles.append({
-			"position": target_position + direction * randf_range(2.0, 7.0),
-			"velocity": direction * randf_range(15.0, 45.0),
-			"life": BLOOD_PARTICLE_LIFE * randf_range(0.55, 0.85)
-		})
-	if target.hp <= 0:
-		zombies.erase(target)
-		zombies_killed += 1
-		baseball_kills += 1
+	baseball_swing_time = BASEBALL_SWING_DURATION
+	var hit_zombies: Array[Dictionary] = []
+	for zombie in zombies:
+		if baseball_position.distance_to(_zombie_position(zombie)) <= BASEBALL_AOE_METERS * TILE_SIZE:
+			hit_zombies.append(zombie)
+
+	for zombie in hit_zombies:
+		var target_position := _zombie_position(zombie)
+		if String(zombie.target_id) == "":
+			zombie.target_id = "baseball"
+		var knockback_direction := baseball_position.direction_to(target_position)
+		var knocked_position := target_position + knockback_direction * BASEBALL_KNOCKBACK
+		zombie.x = knocked_position.x / _map_size().x
+		zombie.y = knocked_position.y
+		zombie.movement_factor = 0.02
+		zombie.hp -= BASEBALL_DAMAGE
+		for i in 4:
+			var direction := Vector2.RIGHT.rotated(randf_range(0.0, TAU))
+			blood_particles.append({
+				"position": target_position + direction * randf_range(2.0, 7.0),
+				"velocity": direction * randf_range(15.0, 45.0),
+				"life": BLOOD_PARTICLE_LIFE * randf_range(0.55, 0.85)
+			})
+		if zombie.hp <= 0 and zombies.has(zombie):
+			zombies.erase(zombie)
+			zombies_killed += 1
+			baseball_kills += 1
 
 func _closest_zombie() -> Dictionary:
 	var closest: Dictionary = {}
@@ -544,6 +555,7 @@ func _start_game() -> void:
 	baseball_is_walking = false
 	baseball_aim_angle = PI
 	baseball_attack_cooldown = 0.0
+	baseball_swing_time = 0.0
 	baseball_kills = 0
 	dragging_unit = ""
 	survivor_health = SURVIVOR_MAX_HEALTH
@@ -925,8 +937,14 @@ func _draw() -> void:
 		draw_set_transform(baseball_screen, baseball_aim_angle, Vector2(map_zoom, map_zoom))
 		var baseball_color := Color.WHITE if baseball_alive else Color(0.35, 0.35, 0.35, 1.0)
 		draw_texture_rect(BASEBALL_TEXTURE, Rect2(Vector2(-34, -30), Vector2(68, 60)), false, baseball_color)
-		draw_line(Vector2(12, 0), Vector2(49, 0), Color("#b98245"), 8.0)
-		draw_circle(Vector2(49, 0), 5.0, Color("#d1a063"))
+		var bat_angle := 0.82
+		if baseball_swing_time > 0.0:
+			var swing_progress := 1.0 - baseball_swing_time / BASEBALL_SWING_DURATION
+			bat_angle = lerpf(-1.15, 1.05, swing_progress)
+		var bat_start := Vector2(10, 0).rotated(bat_angle)
+		var bat_end := Vector2(52, 0).rotated(bat_angle)
+		draw_line(bat_start, bat_end, Color("#b98245"), 8.0)
+		draw_circle(bat_end, 5.0, Color("#d1a063"))
 		draw_set_transform(Vector2.ZERO, 0.0)
 		var baseball_bar := baseball_screen + Vector2(-28, -40)
 		draw_rect(Rect2(baseball_bar, Vector2(56, 6)), Color("#251f1f"))
