@@ -15,6 +15,7 @@ const ZOMBIE_SPEED := 0.069
 const ZOMBIE_CHASE_SPEED := 55.0
 const ZOMBIE_ATTACK_RANGE := 34.0
 const ZOMBIE_ATTACK_RATE := 0.8
+const ZOMBIE_COLLISION_DIAMETER := 44.0
 const SURVIVOR_MAX_HEALTH := 10
 const ZOMBIE_MAX_HEALTH := 3
 const FIRE_RATE := 0.65
@@ -223,7 +224,7 @@ func _update_zombies(delta: float) -> void:
 			zombie.aim_angle = rotate_toward(zombie.aim_angle, desired_angle, SURVIVOR_TURN_SPEED * delta)
 			if distance > ZOMBIE_ATTACK_RANGE:
 				var direction := zombie_position.direction_to(survivor_position)
-				zombie.x += direction.x * ZOMBIE_CHASE_SPEED * delta / size.x
+				zombie.x += direction.x * ZOMBIE_CHASE_SPEED * delta / _map_size().x
 				zombie.y += direction.y * ZOMBIE_CHASE_SPEED * delta
 			else:
 				zombie.attack_cooldown -= delta
@@ -243,6 +244,30 @@ func _update_zombies(delta: float) -> void:
 			if health <= 0:
 				_show_results()
 				return
+
+	_separate_zombies()
+
+func _separate_zombies() -> void:
+	# Resolve each pair equally so a dense swarm bunches up instead of stacking.
+	var map_width := _map_size().x
+	for i in zombies.size():
+		for j in range(i + 1, zombies.size()):
+			var first: Dictionary = zombies[i]
+			var second: Dictionary = zombies[j]
+			var first_position := _zombie_position(first)
+			var second_position := _zombie_position(second)
+			var difference := second_position - first_position
+			var distance := difference.length()
+			if distance >= ZOMBIE_COLLISION_DIAMETER:
+				continue
+			var direction := difference / distance if distance > 0.001 else Vector2.UP.rotated(randf() * TAU)
+			var correction := direction * (ZOMBIE_COLLISION_DIAMETER - distance) * 0.5
+			first_position -= correction
+			second_position += correction
+			first.x = first_position.x / map_width
+			first.y = first_position.y
+			second.x = second_position.x / map_width
+			second.y = second_position.y
 
 func _kill_survivor() -> void:
 	survivor_health = 0
