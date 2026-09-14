@@ -26,6 +26,10 @@ jobs:
         run: |
           printf 'class_name BuildVersion\n\nconst BRANCH := "%s"\nconst COMMIT := "%s"\n' \
             "${GITHUB_REF_NAME}" "${GITHUB_SHA::7}" > version.gd
+      - name: Install web export templates
+        run: |
+          mkdir -p /github/home/.local/share/godot/export_templates
+          cp -r /root/.local/share/godot/export_templates/4.3.stable /github/home/.local/share/godot/export_templates/
       - name: Export web build
         run: |
           mkdir -p build/web
