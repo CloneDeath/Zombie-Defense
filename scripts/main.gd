@@ -26,6 +26,7 @@ const SURVIVOR_MAX_HEALTH := 10
 const BASEBALL_MAX_HEALTH := 12
 const BASEBALL_ROAM_METERS := 7.0
 const BASEBALL_MELEE_METERS := 0.75
+const BASEBALL_WAIT_DISTANCE_METERS := 1.5
 const BASEBALL_SPEED := 95.0
 const BASEBALL_ATTACK_RATE := 0.8
 const BASEBALL_DAMAGE := 0.5
@@ -417,10 +418,20 @@ func _update_baseball_survivor(delta: float) -> void:
 		var desired_angle := baseball_position.angle_to_point(target_position)
 		baseball_aim_angle = rotate_toward(baseball_aim_angle, desired_angle, SURVIVOR_TURN_SPEED * delta)
 		var distance := baseball_position.distance_to(target_position)
-		if distance <= BASEBALL_MELEE_METERS * TILE_SIZE:
+		if baseball_attack_cooldown > 0.0:
+			var wait_distance := BASEBALL_WAIT_DISTANCE_METERS * TILE_SIZE
+			if distance < wait_distance:
+				baseball_is_walking = true
+				var retreat_direction := target_position.direction_to(baseball_position)
+				var next_position := baseball_position + retreat_direction * BASEBALL_SPEED * delta
+				var max_roam := BASEBALL_ROAM_METERS * TILE_SIZE
+				if next_position.distance_to(baseball_target) <= max_roam:
+					baseball_position = next_position
+			else:
+				baseball_is_walking = false
+		elif distance <= BASEBALL_MELEE_METERS * TILE_SIZE:
 			baseball_is_walking = false
-			if baseball_attack_cooldown <= 0.0:
-				_swing_bat(target)
+			_swing_bat(target)
 		else:
 			baseball_is_walking = true
 			baseball_position = baseball_position.move_toward(target_position, BASEBALL_SPEED * delta)
