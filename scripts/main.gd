@@ -490,6 +490,15 @@ func _swing_bat(target: Dictionary) -> void:
 			zombies_killed += 1
 			baseball_kills += 1
 
+	# The impact can also draw nearby, untargeted zombies toward the batter.
+	var hearing_range := GUNSHOT_HEARING_RANGE_METERS * TILE_SIZE
+	for zombie in zombies:
+		if String(zombie.target_id) != "":
+			continue
+		if _zombie_position(zombie).distance_to(baseball_position) <= hearing_range:
+			if randf() <= GUNSHOT_RETARGET_CHANCE:
+				zombie.target_id = "baseball"
+
 func _closest_zombie() -> Dictionary:
 	var closest: Dictionary = {}
 	var closest_distance := INF
