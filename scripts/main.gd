@@ -290,6 +290,27 @@ func _update_zombies(delta: float) -> void:
 
 	_separate_zombies()
 
+func _separate_zombies() -> void:
+	var map_width := _map_size().x
+	for i in zombies.size():
+		for j in range(i + 1, zombies.size()):
+			var first: Dictionary = zombies[i]
+			var second: Dictionary = zombies[j]
+			var first_position := _zombie_position(first)
+			var second_position := _zombie_position(second)
+			var difference := second_position - first_position
+			var distance := difference.length()
+			if distance >= ZOMBIE_COLLISION_DIAMETER:
+				continue
+			var direction := difference / distance if distance > 0.001 else Vector2.UP.rotated(randf() * TAU)
+			var correction := direction * (ZOMBIE_COLLISION_DIAMETER - distance) * 0.5
+			first_position -= correction
+			second_position += correction
+			first.x = first_position.x / map_width
+			first.y = first_position.y
+			second.x = second_position.x / map_width
+			second.y = second_position.y
+
 func _survivor_target_alive(target_id: String) -> bool:
 	if target_id == "cop":
 		return survivor_spawn >= 0 and survivor_alive
