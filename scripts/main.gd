@@ -178,7 +178,7 @@ func _spawn_zombie() -> void:
 func _update_zombies(delta: float) -> void:
 	for zombie in zombies.duplicate():
 		if zombie.alerted and survivor_alive and survivor_spawn >= 0:
-			var zombie_position := _zombie_position(zombie) + map_offset
+			var zombie_position := _zombie_position(zombie)
 			var distance := zombie_position.distance_to(survivor_position)
 			var desired_angle := zombie_position.angle_to_point(survivor_position)
 			zombie.aim_angle = rotate_toward(zombie.aim_angle, desired_angle, SURVIVOR_TURN_SPEED * delta)
@@ -471,7 +471,7 @@ func _draw() -> void:
 		draw_rect(Rect2(survivor_bar, Vector2(56.0 * survivor_health / SURVIVOR_MAX_HEALTH, 6)), Color("#63d471"))
 
 	for zombie in zombies:
-		var zombie_position := _zombie_position(zombie)
+		var zombie_position := _zombie_position(zombie) + map_offset
 		draw_set_transform(zombie_position, zombie.aim_angle)
 		draw_texture_rect(ZOMBIE_TEXTURE, Rect2(Vector2(-30, -39), Vector2(60, 78)), false)
 		draw_set_transform(Vector2.ZERO, 0.0)
