@@ -327,7 +327,7 @@ func _draw() -> void:
 			draw_line(p-Vector2(14,14),p+Vector2(14,14),Color("#8b3333"),6)
 			draw_line(p+Vector2(-14,14),p+Vector2(14,-14),Color("#8b3333"),6)
 	for z in zombies:
-		var zy := top + field_h * (z.lane + 0.5) / 3.0
+		var zy: float = top + field_h * (float(z.lane) + 0.5) / 3.0
 		var zp := Vector2(z.x*w,zy)
 		draw_circle(zp,17,Color("#79a85b"))
 		draw_circle(zp+Vector2(-6,-4),3,Color("#f1efba"))
