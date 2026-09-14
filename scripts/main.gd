@@ -1,15 +1,27 @@
 extends Control
 
 const ZOMBIE_TEXTURE := preload("res://assets/kenney/zombie.png")
+const SURVIVOR_TEXTURE := preload("res://assets/kenney/survivor.png")
 const STARTING_HEALTH := 10
 const ZOMBIE_SPEED := 0.16
+const ZOMBIE_MAX_HEALTH := 3
+const FIRE_RATE := 0.65
 
 var screen := "menu"
 var health := STARTING_HEALTH
 var zombies_passed := 0
+var zombies_killed := 0
 var zombie_x := -0.1
+var zombie_health := ZOMBIE_MAX_HEALTH
 var spawn_delay := 0.6
 var zombie_active := false
+
+var survivor_spawn := -1
+var survivor_selected := false
+var dragging_survivor := false
+var drag_position := Vector2.ZERO
+var fire_cooldown := 0.0
+var shots: Array[Dictionary] = []
 
 var title_label: Label
 var health_label: Label
@@ -83,7 +95,7 @@ func _layout_ui() -> void:
 	version_label.position = Vector2(size.x - 225, 8)
 	version_label.size = Vector2(210, 22)
 
-	health_label.position = Vector2(10, 55)
+	health_label.position = Vector2(10, 45)
 	health_label.size = Vector2(size.x - 20, 40)
 
 	results_label.position = Vector2(10, size.y * 0.38)
@@ -104,6 +116,10 @@ func _process(delta: float) -> void:
 
 	if zombie_active:
 		zombie_x += ZOMBIE_SPEED * delta
+		if survivor_spawn >= 0:
+			fire_cooldown -= delta
+			if fire_cooldown <= 0.0:
+				_shoot()
 		if zombie_x > 1.08:
 			zombie_active = false
 			zombies_passed += 1
@@ -115,26 +131,54 @@ func _process(delta: float) -> void:
 	else:
 		spawn_delay -= delta
 		if spawn_delay <= 0.0:
-			zombie_x = -0.1
-			zombie_active = true
+			_spawn_zombie()
 
-	health_label.text = "TOWN HEALTH: %d" % health
+	for shot in shots.duplicate():
+		shot.life -= delta
+		if shot.life <= 0.0:
+			shots.erase(shot)
+
+	health_label.text = "TOWN HEALTH: %d    KILLED: %d" % [health, zombies_killed]
 	queue_redraw()
+
+func _spawn_zombie() -> void:
+	zombie_x = -0.1
+	zombie_health = ZOMBIE_MAX_HEALTH
+	zombie_active = true
+	fire_cooldown = 0.15
+
+func _shoot() -> void:
+	var points := _spawn_points()
+	var start: Vector2 = points[survivor_spawn]
+	var target := _zombie_position()
+	shots.append({"start":start, "end":target, "life":0.12})
+	fire_cooldown = FIRE_RATE
+	zombie_health -= 1
+	if zombie_health <= 0:
+		zombie_active = false
+		zombies_killed += 1
+		spawn_delay = 0.6
 
 func _start_game() -> void:
 	screen = "playing"
 	health = STARTING_HEALTH
 	zombies_passed = 0
+	zombies_killed = 0
 	zombie_x = -0.1
 	spawn_delay = 0.5
 	zombie_active = false
+	survivor_spawn = -1
+	survivor_selected = false
+	dragging_survivor = false
+	fire_cooldown = 0.0
+	shots.clear()
 	title_label.hide()
 	results_label.hide()
 	begin_button.hide()
 	retry_button.hide()
 	menu_button.hide()
 	health_label.show()
-	health_label.text = "TOWN HEALTH: %d" % health
+	health_label.text = "TOWN HEALTH: %d    KILLED: 0" % health
 	queue_redraw()
 
 func _show_menu() -> void:
@@ -154,32 +198,152 @@ func _show_results() -> void:
 	health_label.hide()
 	title_label.show()
 	title_label.text = "THE TOWN FELL"
-	results_label.text = "%d zombies got through." % zombies_passed
+	results_label.text = "%d zombies killed\n%d zombies got through" % [zombies_killed, zombies_passed]
 	results_label.show()
 	begin_button.hide()
 	retry_button.show()
 	menu_button.show()
 	queue_redraw()
 
+func _input(event: InputEvent) -> void:
+	if screen != "playing" or survivor_spawn >= 0:
+		return
+
+	if event is InputEventScreenTouch:
+		if event.pressed:
+			_handle_pointer_down(event.position)
+		else:
+			_handle_pointer_up(event.position)
+	elif event is InputEventScreenDrag:
+		if dragging_survivor:
+			drag_position = event.position
+			queue_redraw()
+	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			_handle_pointer_down(event.position)
+		else:
+			_handle_pointer_up(event.position)
+	elif event is InputEventMouseMotion and dragging_survivor:
+		drag_position = event.position
+		queue_redraw()
+
+func _handle_pointer_down(position: Vector2) -> void:
+	if _survivor_card_rect().has_point(position):
+		survivor_selected = true
+		dragging_survivor = true
+		drag_position = position
+		queue_redraw()
+	elif survivor_selected:
+		var index := _spawn_point_at(position)
+		if index >= 0:
+			_place_survivor(index)
+
+func _handle_pointer_up(position: Vector2) -> void:
+	if not dragging_survivor:
+		return
+	dragging_survivor = false
+	var index := _spawn_point_at(position)
+	if index >= 0:
+		_place_survivor(index)
+	queue_redraw()
+
+func _place_survivor(index: int) -> void:
+	survivor_spawn = index
+	survivor_selected = false
+	dragging_survivor = false
+	fire_cooldown = 0.0
+	queue_redraw()
+
+func _spawn_point_at(position: Vector2) -> int:
+	var points := _spawn_points()
+	for i in points.size():
+		if points[i].distance_to(position) <= 38.0:
+			return i
+	return -1
+
+func _field_rect() -> Rect2:
+	return Rect2(0, 90, size.x, maxf(160.0, size.y - 205.0))
+
+func _road_rect() -> Rect2:
+	var field := _field_rect()
+	var road_height := minf(135.0, field.size.y * 0.48)
+	return Rect2(0, field.position.y + (field.size.y - road_height) * 0.5, size.x, road_height)
+
+func _spawn_points() -> Array[Vector2]:
+	var road := _road_rect()
+	var upper_y := maxf(_field_rect().position.y + 32.0, road.position.y - 34.0)
+	var lower_y := minf(_field_rect().end.y - 32.0, road.end.y + 34.0)
+	return [
+		Vector2(size.x * 0.35, upper_y),
+		Vector2(size.x * 0.65, upper_y),
+		Vector2(size.x * 0.35, lower_y),
+		Vector2(size.x * 0.65, lower_y)
+	]
+
+func _survivor_card_rect() -> Rect2:
+	return Rect2(size.x * 0.5 - 52, size.y - 105, 104, 92)
+
+func _zombie_position() -> Vector2:
+	var road := _road_rect()
+	return Vector2(zombie_x * size.x, road.position.y + road.size.y * 0.5)
+
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), Color("#111812"))
 
-	if screen == "playing":
-		var field_top := 110.0
-		var field_bottom := size.y - 45.0
-		var field_height := maxf(120.0, field_bottom - field_top)
-		draw_rect(Rect2(0, field_top, size.x, field_height), Color("#334a35"))
+	if screen != "playing":
+		return
 
-		var road_height := minf(150.0, field_height * 0.55)
-		var road_y := field_top + (field_height - road_height) * 0.5
-		draw_rect(Rect2(0, road_y, size.x, road_height), Color("#5b5a50"))
-		draw_line(Vector2(0, road_y), Vector2(size.x, road_y), Color("#7b795f"), 4)
-		draw_line(Vector2(0, road_y + road_height), Vector2(size.x, road_y + road_height), Color("#7b795f"), 4)
+	var field := _field_rect()
+	var road := _road_rect()
+	draw_rect(field, Color("#334a35"))
+	draw_rect(road, Color("#5b5a50"))
+	draw_line(Vector2(0, road.position.y), Vector2(size.x, road.position.y), Color("#7b795f"), 4)
+	draw_line(Vector2(0, road.end.y), Vector2(size.x, road.end.y), Color("#7b795f"), 4)
 
-		if zombie_active:
-			var zombie_position := Vector2(zombie_x * size.x, road_y + road_height * 0.5)
-			draw_texture_rect(
-				ZOMBIE_TEXTURE,
-				Rect2(zombie_position - Vector2(30, 39), Vector2(60, 78)),
-				false
-			)
+	var points := _spawn_points()
+	for i in points.size():
+		var occupied := i == survivor_spawn
+		var point_color := Color("#d9ba58") if survivor_selected and not occupied else Color("#78917a")
+		draw_circle(points[i], 30, Color(point_color, 0.35))
+		draw_arc(points[i], 30, 0, TAU, 32, point_color, 3)
+		if not occupied:
+			draw_string(ThemeDB.fallback_font, points[i] + Vector2(-7, 7), "+", HORIZONTAL_ALIGNMENT_CENTER, 14, 22, point_color)
+
+	if survivor_spawn >= 0:
+		var survivor_position := points[survivor_spawn]
+		draw_texture_rect(
+			SURVIVOR_TEXTURE,
+			Rect2(survivor_position - Vector2(38, 32), Vector2(76, 64)),
+			false
+		)
+
+	if zombie_active:
+		var zombie_position := _zombie_position()
+		draw_texture_rect(
+			ZOMBIE_TEXTURE,
+			Rect2(zombie_position - Vector2(30, 39), Vector2(60, 78)),
+			false
+		)
+		var bar_position := zombie_position + Vector2(-25, -47)
+		draw_rect(Rect2(bar_position, Vector2(50, 6)), Color("#251f1f"))
+		draw_rect(Rect2(bar_position, Vector2(50.0 * zombie_health / ZOMBIE_MAX_HEALTH, 6)), Color("#d85a55"))
+
+	for shot in shots:
+		draw_line(shot.start, shot.end, Color("#ffe184"), 3)
+		draw_circle(shot.end, 4, Color("#fff4b0"))
+
+	if survivor_spawn < 0:
+		var card := _survivor_card_rect()
+		var card_color := Color("#6f8e70") if survivor_selected else Color("#344d38")
+		draw_rect(card, card_color)
+		draw_rect(card, Color("#9fba9e"), false, 2)
+		draw_texture_rect(SURVIVOR_TEXTURE, Rect2(card.position + Vector2(23, 5), Vector2(58, 49)), false)
+		draw_string(ThemeDB.fallback_font, card.position + Vector2(16, 78), "SURVIVOR", HORIZONTAL_ALIGNMENT_CENTER, 72, 14, Color.WHITE)
+
+	if dragging_survivor:
+		draw_texture_rect(
+			SURVIVOR_TEXTURE,
+			Rect2(drag_position - Vector2(38, 32), Vector2(76, 64)),
+			false,
+			Color(1, 1, 1, 0.75)
+	)
