@@ -16,6 +16,8 @@ const ZOMBIE_CHASE_SPEED := 55.0
 const ZOMBIE_ATTACK_RANGE := 34.0
 const ZOMBIE_ATTACK_RATE := 0.8
 const ZOMBIE_COLLISION_DIAMETER := 44.0
+const ZOMBIE_HIT_KNOCKBACK := 12.0
+const ZOMBIE_ACCELERATION := 1.8
 const SURVIVOR_MAX_HEALTH := 10
 const ZOMBIE_MAX_HEALTH := 3
 const FIRE_RATE := 0.65
@@ -209,6 +211,7 @@ func _spawn_zombie() -> void:
 		"y": randf_range(road.position.y + edge_margin, road.end.y - edge_margin),
 		"hp": ZOMBIE_MAX_HEALTH,
 		"speed_multiplier": randf_range(0.85, 1.15),
+		"movement_factor": 1.0,
 		"alerted": false,
 		"attack_cooldown": 0.0,
 		"aim_angle": 0.0
@@ -216,6 +219,11 @@ func _spawn_zombie() -> void:
 
 func _update_zombies(delta: float) -> void:
 	for zombie in zombies.duplicate():
+		zombie.movement_factor = move_toward(
+			zombie.movement_factor,
+			1.0,
+			ZOMBIE_ACCELERATION * delta
+		)
 		if zombie.alerted and survivor_alive and survivor_spawn >= 0:
 			var zombie_position := _zombie_position(zombie)
 			var distance := zombie_position.distance_to(survivor_position)
@@ -223,8 +231,8 @@ func _update_zombies(delta: float) -> void:
 			zombie.aim_angle = rotate_toward(zombie.aim_angle, desired_angle, SURVIVOR_TURN_SPEED * delta)
 			if distance > ZOMBIE_ATTACK_RANGE:
 				var direction := zombie_position.direction_to(survivor_position)
-				zombie.x += direction.x * ZOMBIE_CHASE_SPEED * zombie.speed_multiplier * delta / _map_size().x
-				zombie.y += direction.y * ZOMBIE_CHASE_SPEED * zombie.speed_multiplier * delta
+				zombie.x += direction.x * ZOMBIE_CHASE_SPEED * zombie.speed_multiplier * zombie.movement_factor * delta / _map_size().x
+				zombie.y += direction.y * ZOMBIE_CHASE_SPEED * zombie.speed_multiplier * zombie.movement_factor * delta
 			else:
 				zombie.attack_cooldown -= delta
 				if zombie.attack_cooldown <= 0.0:
@@ -234,7 +242,7 @@ func _update_zombies(delta: float) -> void:
 						_kill_survivor()
 		else:
 			zombie.aim_angle = rotate_toward(zombie.aim_angle, 0.0, SURVIVOR_TURN_SPEED * delta)
-			zombie.x += ZOMBIE_SPEED * zombie.speed_multiplier * delta
+			zombie.x += ZOMBIE_SPEED * zombie.speed_multiplier * zombie.movement_factor * delta
 
 		if zombie.x > 1.08:
 			zombies.erase(zombie)
@@ -358,6 +366,11 @@ func _shoot(target: Dictionary) -> void:
 		})
 	for zombie in zombies:
 		zombie.alerted = true
+	var knockback_direction := survivor_position.direction_to(target_position)
+	var knocked_position := target_position + knockback_direction * ZOMBIE_HIT_KNOCKBACK
+	target.x = knocked_position.x / _map_size().x
+	target.y = knocked_position.y
+	target.movement_factor = 0.08
 	fire_cooldown = FIRE_RATE
 	target.hp -= 1
 	if target.hp <= 0:
