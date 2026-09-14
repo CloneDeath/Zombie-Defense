@@ -2,6 +2,9 @@ extends Control
 
 const ZOMBIE_TEXTURE := preload("res://assets/kenney/zombie.png")
 const SURVIVOR_TEXTURE := preload("res://assets/kenney/survivor.png")
+const GRASS_TEXTURE := preload("res://assets/kenney/grass.png")
+const ROAD_TEXTURE := preload("res://assets/kenney/road.png")
+const SIDEWALK_TEXTURE := preload("res://assets/kenney/sidewalk.png")
 const STARTING_HEALTH := 10
 const MAP_WIDTH_SCALE := 1.45
 const MAP_HEIGHT_SCALE := 1.30
@@ -21,6 +24,8 @@ const EARLY_RELOAD_AT := 5
 const BLOOD_PARTICLE_LIFE := 0.45
 const SURVIVOR_SPEED := 120.0
 const MAP_WIDTH_METERS := 12.0
+const STREET_WIDTH_METERS := 6.0
+const SIDEWALK_WIDTH_METERS := 0.75
 const SURVIVOR_RANGE_METERS := 3.0
 const SURVIVOR_AWARENESS_MULTIPLIER := 2.0
 const SURVIVOR_TURN_SPEED := 2.4
@@ -562,10 +567,30 @@ func _field_rect() -> Rect2:
 	var map_size := _map_size()
 	return Rect2(0, 90, map_size.x, maxf(160.0, map_size.y - 205.0))
 
+func _pixels_per_meter() -> float:
+	return _map_size().x / MAP_WIDTH_METERS
+
 func _road_rect() -> Rect2:
 	var field := _field_rect()
-	var road_height := minf(135.0, field.size.y * 0.48)
-	return Rect2(0, field.position.y + (field.size.y - road_height) * 0.5, _map_size().x, road_height)
+	var sidewalk_width := SIDEWALK_WIDTH_METERS * _pixels_per_meter()
+	var road_height := minf(
+		STREET_WIDTH_METERS * _pixels_per_meter(),
+		maxf(96.0, field.size.y - sidewalk_width * 2.0 - 48.0)
+	)
+	return Rect2(
+		-MAP_OVERSCAN,
+		field.position.y + (field.size.y - road_height) * 0.5,
+		_map_size().x + MAP_OVERSCAN * 2.0,
+		road_height
+	)
+
+func _sidewalk_rects() -> Array[Rect2]:
+	var road := _road_rect()
+	var sidewalk_width := SIDEWALK_WIDTH_METERS * _pixels_per_meter()
+	return [
+		Rect2(road.position.x, road.position.y - sidewalk_width, road.size.x, sidewalk_width),
+		Rect2(road.position.x, road.end.y, road.size.x, sidewalk_width)
+	]
 
 func _spawn_points() -> Array[Vector2]:
 	var road := _road_rect()
@@ -594,20 +619,23 @@ func _draw() -> void:
 		return
 
 	var map_size := _map_size()
-	draw_rect(
-		Rect2(
-			_map_to_screen(Vector2(-MAP_OVERSCAN, -MAP_OVERSCAN)),
-			(map_size + Vector2.ONE * MAP_OVERSCAN * 2.0) * map_zoom
-		),
-		Color("#334a35")
+	var terrain_extent := Rect2(
+		Vector2(-MAP_OVERSCAN, -MAP_OVERSCAN),
+		map_size + Vector2.ONE * MAP_OVERSCAN * 2.0
 	)
-
-	var field := _field_rect()
 	var road := _road_rect()
-	draw_rect(Rect2(_map_to_screen(field.position), field.size * map_zoom), Color("#334a35"))
-	draw_rect(Rect2(_map_to_screen(road.position), road.size * map_zoom), Color("#5b5a50"))
-	draw_line(_map_to_screen(Vector2(0, road.position.y)), _map_to_screen(Vector2(_map_size().x, road.position.y)), Color("#7b795f"), 4)
-	draw_line(_map_to_screen(Vector2(0, road.end.y)), _map_to_screen(Vector2(_map_size().x, road.end.y)), Color("#7b795f"), 4)
+
+	# Draw in map space so Kenney's 64 px tiles zoom and pan with the world.
+	draw_set_transform(map_offset, 0.0, Vector2(map_zoom, map_zoom))
+	draw_texture_rect(GRASS_TEXTURE, terrain_extent, true)
+	# Use the asphalt center of the road-edge tile, avoiding repeated lane lines.
+	draw_texture_rect_region(ROAD_TEXTURE, road, Rect2(8, 0, 48, 64))
+	for sidewalk in _sidewalk_rects():
+		draw_texture_rect(SIDEWALK_TEXTURE, sidewalk, true)
+	draw_set_transform(Vector2.ZERO, 0.0)
+
+	# The road and sidewalks extend through the overscan past both soft bounds,
+	# so dragging beyond an edge still looks like the street continues.
 
 	var points := _spawn_points()
 	for i in points.size():
