@@ -40,10 +40,16 @@ jobs:
           find /tmp/kenney -type f -name soldier1_machine.png -exec cp {} assets/kenney/soldier.png \;
           find /tmp/kenney -type f -name womanGreen_silencer.png -exec cp {} assets/kenney/scout.png \;
           find /tmp/kenney -type f -name zoimbie1_stand.png -exec cp {} assets/kenney/zombie.png \;
+          find /tmp/kenney -type f -path "*/Tiles/tile_01.png" -exec cp {} assets/kenney/grass.png \;
+          find /tmp/kenney -type f -path "*/Tiles/tile_28.png" -exec cp {} assets/kenney/road.png \;
+          find /tmp/kenney -type f -path "*/Tiles/tile_271.png" -exec cp {} assets/kenney/sidewalk.png \;
           test -f assets/kenney/survivor.png
           test -f assets/kenney/soldier.png
           test -f assets/kenney/scout.png
           test -f assets/kenney/zombie.png
+          test -f assets/kenney/grass.png
+          test -f assets/kenney/road.png
+          test -f assets/kenney/sidewalk.png
       - name: Smoke test game scene
         run: godot --headless --path . --quit-after 3
       - name: Export web build
