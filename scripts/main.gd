@@ -208,6 +208,7 @@ func _spawn_zombie() -> void:
 		"x": randf_range(-0.14, -0.08),
 		"y": randf_range(road.position.y + edge_margin, road.end.y - edge_margin),
 		"hp": ZOMBIE_MAX_HEALTH,
+		"speed_multiplier": randf_range(0.85, 1.15),
 		"alerted": false,
 		"attack_cooldown": 0.0,
 		"aim_angle": 0.0
@@ -222,8 +223,8 @@ func _update_zombies(delta: float) -> void:
 			zombie.aim_angle = rotate_toward(zombie.aim_angle, desired_angle, SURVIVOR_TURN_SPEED * delta)
 			if distance > ZOMBIE_ATTACK_RANGE:
 				var direction := zombie_position.direction_to(survivor_position)
-				zombie.x += direction.x * ZOMBIE_CHASE_SPEED * delta / _map_size().x
-				zombie.y += direction.y * ZOMBIE_CHASE_SPEED * delta
+				zombie.x += direction.x * ZOMBIE_CHASE_SPEED * zombie.speed_multiplier * delta / _map_size().x
+				zombie.y += direction.y * ZOMBIE_CHASE_SPEED * zombie.speed_multiplier * delta
 			else:
 				zombie.attack_cooldown -= delta
 				if zombie.attack_cooldown <= 0.0:
@@ -233,7 +234,7 @@ func _update_zombies(delta: float) -> void:
 						_kill_survivor()
 		else:
 			zombie.aim_angle = rotate_toward(zombie.aim_angle, 0.0, SURVIVOR_TURN_SPEED * delta)
-			zombie.x += ZOMBIE_SPEED * delta
+			zombie.x += ZOMBIE_SPEED * zombie.speed_multiplier * delta
 
 		if zombie.x > 1.08:
 			zombies.erase(zombie)
