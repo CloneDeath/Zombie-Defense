@@ -1,5 +1,12 @@
 extends Control
 
+const SURVIVOR_TEXTURES := [
+	preload("res://assets/kenney/survivor.png"),
+	preload("res://assets/kenney/soldier.png"),
+	preload("res://assets/kenney/scout.png")
+]
+const ZOMBIE_TEXTURE := preload("res://assets/kenney/zombie.png")
+
 const MAP_COUNT := 10
 const CAMPAIGN_ZOMBIES := 10000
 const BASE_WAVE := 18
@@ -319,21 +326,16 @@ func _draw() -> void:
 		var s: Dictionary = survivors[lane]
 		var p := Vector2(w*0.25,y)
 		if s.alive:
-			draw_circle(p,18,s.color)
-			draw_circle(p + Vector2(8,-4),7,Color("#ead1af"))
-			draw_line(p + Vector2(14,0),p + Vector2(29,0),Color("#31383c"),5)
-			_health_bar(p + Vector2(-25,-31),50,s.hp/s.max_hp,Color("#63d471"))
+			draw_texture_rect(SURVIVOR_TEXTURES[lane], Rect2(p - Vector2(39, 32), Vector2(78, 64)), false)
+			_health_bar(p + Vector2(-25,-38),50,s.hp/s.max_hp,Color("#63d471"))
 		else:
 			draw_line(p-Vector2(14,14),p+Vector2(14,14),Color("#8b3333"),6)
 			draw_line(p+Vector2(-14,14),p+Vector2(14,-14),Color("#8b3333"),6)
 	for z in zombies:
 		var zy: float = top + field_h * (float(z.lane) + 0.5) / 3.0
 		var zp := Vector2(z.x*w,zy)
-		draw_circle(zp,17,Color("#79a85b"))
-		draw_circle(zp+Vector2(-6,-4),3,Color("#f1efba"))
-		draw_circle(zp+Vector2(6,-4),3,Color("#f1efba"))
-		draw_line(zp+Vector2(-7,7),zp+Vector2(7,7),Color("#4d302e"),3)
-		_health_bar(zp+Vector2(-18,-27),36,z.hp/z.max_hp,Color("#d85a55"))
+		draw_texture_rect(ZOMBIE_TEXTURE, Rect2(zp - Vector2(23, 30), Vector2(46, 60)), false)
+		_health_bar(zp+Vector2(-18,-35),36,z.hp/z.max_hp,Color("#d85a55"))
 	if rally_time > 0.0:
 		draw_string(ThemeDB.fallback_font,Vector2(w*0.5-45,top+24),"RALLY!",HORIZONTAL_ALIGNMENT_CENTER,90,20,Color("#ffe46b"))
 	if state != "playing":
