@@ -121,6 +121,13 @@ func _ready() -> void:
 	menu_button.pressed.connect(_show_menu)
 	_show_menu()
 	_layout_ui()
+	if DisplayServer.get_name() == "headless":
+		call_deferred("_run_headless_gameplay_smoke_test")
+
+func _run_headless_gameplay_smoke_test() -> void:
+	_start_game()
+	_place_survivor(0)
+	_place_baseball_survivor(1)
 
 func _make_label(font_size: int, color: Color) -> Label:
 	var label := Label.new()
