@@ -18,6 +18,9 @@ const ZOMBIE_ATTACK_RATE := 0.8
 const ZOMBIE_COLLISION_DIAMETER := 44.0
 const ZOMBIE_HIT_KNOCKBACK := 12.0
 const ZOMBIE_ACCELERATION := 1.8
+const ZOMBIE_TURN_SPEED := 0.85
+const GUNSHOT_HEARING_RANGE_METERS := 8.0
+const GUNSHOT_RETARGET_CHANCE := 0.35
 const SURVIVOR_MAX_HEALTH := 10
 const ZOMBIE_MAX_HEALTH := 3
 const FIRE_RATE := 0.65
@@ -228,7 +231,7 @@ func _update_zombies(delta: float) -> void:
 			var zombie_position := _zombie_position(zombie)
 			var distance := zombie_position.distance_to(survivor_position)
 			var desired_angle := zombie_position.angle_to_point(survivor_position)
-			zombie.aim_angle = rotate_toward(zombie.aim_angle, desired_angle, SURVIVOR_TURN_SPEED * delta)
+			zombie.aim_angle = rotate_toward(zombie.aim_angle, desired_angle, ZOMBIE_TURN_SPEED * delta)
 			if distance > ZOMBIE_ATTACK_RANGE:
 				var direction := zombie_position.direction_to(survivor_position)
 				zombie.x += direction.x * ZOMBIE_CHASE_SPEED * zombie.speed_multiplier * zombie.movement_factor * delta / _map_size().x
@@ -241,7 +244,7 @@ func _update_zombies(delta: float) -> void:
 					if survivor_health <= 0:
 						_kill_survivor()
 		else:
-			zombie.aim_angle = rotate_toward(zombie.aim_angle, 0.0, SURVIVOR_TURN_SPEED * delta)
+			zombie.aim_angle = rotate_toward(zombie.aim_angle, 0.0, ZOMBIE_TURN_SPEED * delta)
 			zombie.x += ZOMBIE_SPEED * zombie.speed_multiplier * zombie.movement_factor * delta
 
 		if zombie.x > 1.08:
@@ -364,8 +367,20 @@ func _shoot(target: Dictionary) -> void:
 			"velocity": direction * randf_range(20.0, 65.0),
 			"life": BLOOD_PARTICLE_LIFE * randf_range(0.65, 1.0)
 		})
+	# The zombie that was hit acquires the shooter if it was still wandering.
+	if not target.alerted:
+		target.alerted = true
+
+	# Other untargeted zombies may hear the shot. Hearing is local and
+	# intentionally unreliable, keeping the whole swarm from turning at once.
+	var hearing_range := GUNSHOT_HEARING_RANGE_METERS * TILE_SIZE
 	for zombie in zombies:
-		zombie.alerted = true
+		if zombie == target or zombie.alerted:
+			continue
+		if _zombie_position(zombie).distance_to(survivor_position) <= hearing_range:
+			if randf() <= GUNSHOT_RETARGET_CHANCE:
+				zombie.alerted = true
+
 	var knockback_direction := survivor_position.direction_to(target_position)
 	var knocked_position := target_position + knockback_direction * ZOMBIE_HIT_KNOCKBACK
 	target.x = knocked_position.x / _map_size().x
