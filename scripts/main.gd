@@ -9,6 +9,8 @@ const FIRE_RATE := 0.65
 const SURVIVOR_SPEED := 120.0
 const MAP_WIDTH_METERS := 12.0
 const SURVIVOR_RANGE_METERS := 3.0
+const SURVIVOR_AWARENESS_MULTIPLIER := 2.0
+const SURVIVOR_TURN_SPEED := 2.4
 
 var screen := "menu"
 var health := STARTING_HEALTH
@@ -27,6 +29,7 @@ var fire_cooldown := 0.0
 var survivor_position := Vector2.ZERO
 var survivor_target := Vector2.ZERO
 var survivor_is_walking := false
+var survivor_aim_angle := PI
 var shots: Array[Dictionary] = []
 
 var title_label: Label
@@ -130,19 +133,6 @@ func _process(delta: float) -> void:
 
 	if zombie_active:
 		zombie_x += ZOMBIE_SPEED * delta
-		if survivor_spawn >= 0:
-			survivor_target = _spawn_points()[survivor_spawn]
-			var zombie_in_range := survivor_position.distance_to(_zombie_position()) <= _survivor_range()
-			if zombie_in_range:
-				survivor_is_walking = false
-				fire_cooldown -= delta
-				if fire_cooldown <= 0.0:
-					_shoot()
-			elif survivor_position.distance_to(survivor_target) > 1.0:
-				survivor_is_walking = true
-				survivor_position = survivor_position.move_toward(survivor_target, SURVIVOR_SPEED * delta)
-			else:
-				survivor_is_walking = false
 		if zombie_x > 1.08:
 			zombie_active = false
 			zombies_passed += 1
@@ -155,6 +145,8 @@ func _process(delta: float) -> void:
 		spawn_delay -= delta
 		if spawn_delay <= 0.0:
 			_spawn_zombie()
+
+	_update_survivor(delta)
 
 	for shot in shots.duplicate():
 		shot.life -= delta
@@ -169,6 +161,36 @@ func _spawn_zombie() -> void:
 	zombie_health = ZOMBIE_MAX_HEALTH
 	zombie_active = true
 	fire_cooldown = 0.15
+
+func _update_survivor(delta: float) -> void:
+	if survivor_spawn < 0:
+		return
+
+	survivor_target = _spawn_points()[survivor_spawn]
+	var distance_to_zombie := INF
+	if zombie_active:
+		distance_to_zombie = survivor_position.distance_to(_zombie_position())
+
+	var zombie_in_range := distance_to_zombie <= _survivor_range()
+	var zombie_in_awareness := distance_to_zombie <= _survivor_range() * SURVIVOR_AWARENESS_MULTIPLIER
+
+	if zombie_in_awareness:
+		var desired_angle := survivor_position.angle_to_point(_zombie_position())
+		survivor_aim_angle = rotate_toward(survivor_aim_angle, desired_angle, SURVIVOR_TURN_SPEED * delta)
+	elif survivor_position.distance_to(survivor_target) > 1.0:
+		var walk_angle := survivor_position.angle_to_point(survivor_target)
+		survivor_aim_angle = rotate_toward(survivor_aim_angle, walk_angle, SURVIVOR_TURN_SPEED * delta)
+
+	if zombie_in_range:
+		survivor_is_walking = false
+		fire_cooldown -= delta
+		if fire_cooldown <= 0.0:
+			_shoot()
+	elif survivor_position.distance_to(survivor_target) > 1.0:
+		survivor_is_walking = true
+		survivor_position = survivor_position.move_toward(survivor_target, SURVIVOR_SPEED * delta)
+	else:
+		survivor_is_walking = false
 
 func _shoot() -> void:
 	var points := _spawn_points()
@@ -274,6 +296,7 @@ func _place_survivor(index: int) -> void:
 	survivor_spawn = index
 	survivor_target = _spawn_points()[index]
 	survivor_position = Vector2(size.x + 55.0, survivor_target.y)
+	survivor_aim_angle = PI
 	survivor_is_walking = true
 	survivor_selected = false
 	dragging_survivor = false
@@ -342,13 +365,7 @@ func _draw() -> void:
 		draw_circle(survivor_position, _survivor_range(), Color(0.45, 0.72, 0.48, 0.08))
 		draw_arc(survivor_position, _survivor_range(), 0, TAU, 48, Color(0.45, 0.72, 0.48, 0.25), 2)
 
-		var aim_angle := 0.0
-		if zombie_active and survivor_position.distance_to(_zombie_position()) <= _survivor_range():
-			aim_angle = survivor_position.angle_to_point(_zombie_position())
-		elif survivor_is_walking:
-			aim_angle = survivor_position.angle_to_point(survivor_target)
-
-		draw_set_transform(survivor_position, aim_angle)
+		draw_set_transform(survivor_position, survivor_aim_angle)
 		draw_texture_rect(
 			SURVIVOR_TEXTURE,
 			Rect2(Vector2(-38, -32), Vector2(76, 64)),
