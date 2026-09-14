@@ -478,44 +478,53 @@ func _draw() -> void:
 	if screen != "playing":
 		return
 
-	draw_set_transform(camera_offset, 0.0, Vector2(camera_zoom, camera_zoom))
-	draw_rect(Rect2(Vector2.ZERO, WORLD_SIZE), Color("#334a35"))
-	draw_polyline(PackedVector2Array(PATH_POINTS), Color("#777565"), 116.0, true)
-	draw_polyline(PackedVector2Array(PATH_POINTS), Color("#a09d87"), 6.0, true)
+	var world_rect := Rect2(camera_offset, WORLD_SIZE * camera_zoom)
+	draw_rect(world_rect, Color("#334a35"))
+
+	var screen_path := PackedVector2Array()
+	for point in PATH_POINTS:
+		screen_path.append(_world_to_screen(point))
+	draw_polyline(screen_path, Color("#777565"), 116.0 * camera_zoom, true)
+	draw_polyline(screen_path, Color("#a09d87"), maxf(2.0, 6.0 * camera_zoom), true)
 
 	for i in SPAWN_POINTS.size():
+		var point := _world_to_screen(SPAWN_POINTS[i])
 		var occupied := i == survivor_spawn
 		var point_color := Color("#d9ba58") if survivor_selected and not occupied else Color("#78917a")
-		draw_circle(SPAWN_POINTS[i], 34, Color(point_color, 0.35))
-		draw_arc(SPAWN_POINTS[i], 34, 0, TAU, 32, point_color, 3.0 / camera_zoom)
+		var radius := 34.0 * camera_zoom
+		draw_circle(point, radius, Color(point_color, 0.35))
+		draw_arc(point, radius, 0, TAU, 32, point_color, 3)
 		if not occupied:
-			draw_string(ThemeDB.fallback_font, SPAWN_POINTS[i] + Vector2(-8, 8), "+", HORIZONTAL_ALIGNMENT_CENTER, 16, 24, point_color)
+			draw_string(ThemeDB.fallback_font, point + Vector2(-7, 7), "+", HORIZONTAL_ALIGNMENT_CENTER, 14, 22, point_color)
 
 	if survivor_spawn >= 0:
+		var survivor_screen := _world_to_screen(survivor_position)
 		if survivor_alive:
-			draw_circle(survivor_position, SURVIVOR_RANGE, Color(0.45, 0.72, 0.48, 0.07))
-			draw_arc(survivor_position, SURVIVOR_RANGE, 0, TAU, 48, Color(0.45, 0.72, 0.48, 0.25), 2.0 / camera_zoom)
-		draw_set_transform(camera_offset + survivor_position * camera_zoom, survivor_aim_angle, Vector2(camera_zoom, camera_zoom))
+			draw_circle(survivor_screen, SURVIVOR_RANGE * camera_zoom, Color(0.45, 0.72, 0.48, 0.07))
+			draw_arc(survivor_screen, SURVIVOR_RANGE * camera_zoom, 0, TAU, 48, Color(0.45, 0.72, 0.48, 0.25), 2)
+		draw_set_transform(survivor_screen, survivor_aim_angle, Vector2(camera_zoom, camera_zoom))
 		var survivor_color := Color.WHITE if survivor_alive else Color(0.35, 0.35, 0.35, 1)
 		draw_texture_rect(SURVIVOR_TEXTURE, Rect2(Vector2(-38, -32), Vector2(76, 64)), false, survivor_color)
-		draw_set_transform(camera_offset, 0.0, Vector2(camera_zoom, camera_zoom))
-		var survivor_bar := survivor_position + Vector2(-28, -42)
+		draw_set_transform(Vector2.ZERO, 0.0)
+		var survivor_bar := survivor_screen + Vector2(-28, -42)
 		draw_rect(Rect2(survivor_bar, Vector2(56, 6)), Color("#251f1f"))
 		draw_rect(Rect2(survivor_bar, Vector2(56.0 * survivor_health / SURVIVOR_MAX_HEALTH, 6)), Color("#63d471"))
 
 	for zombie in zombies:
-		draw_set_transform(camera_offset + zombie.position * camera_zoom, zombie.aim_angle, Vector2(camera_zoom, camera_zoom))
+		var zombie_screen := _world_to_screen(zombie.position)
+		draw_set_transform(zombie_screen, zombie.aim_angle, Vector2(camera_zoom, camera_zoom))
 		draw_texture_rect(ZOMBIE_TEXTURE, Rect2(Vector2(-30, -39), Vector2(60, 78)), false)
-		draw_set_transform(camera_offset, 0.0, Vector2(camera_zoom, camera_zoom))
-		var bar_position: Vector2 = zombie.position + Vector2(-25, -47)
+		draw_set_transform(Vector2.ZERO, 0.0)
+		var bar_position := zombie_screen + Vector2(-25, -47)
 		draw_rect(Rect2(bar_position, Vector2(50, 6)), Color("#251f1f"))
 		draw_rect(Rect2(bar_position, Vector2(50.0 * zombie.hp / ZOMBIE_MAX_HEALTH, 6)), Color("#d85a55"))
 
 	for shot in shots:
-		draw_line(shot.start, shot.end, Color("#ffe184"), 3.0 / camera_zoom)
-		draw_circle(shot.end, 4.0 / camera_zoom, Color("#fff4b0"))
+		var shot_start := _world_to_screen(shot.start)
+		var shot_end := _world_to_screen(shot.end)
+		draw_line(shot_start, shot_end, Color("#ffe184"), 3)
+		draw_circle(shot_end, 4, Color("#fff4b0"))
 
-	draw_set_transform(Vector2.ZERO, 0.0)
 	draw_rect(Rect2(0, 0, size.x, 78), Color("#111812"))
 	draw_rect(Rect2(0, size.y - 112, size.x, 112), Color("#111812"))
 
