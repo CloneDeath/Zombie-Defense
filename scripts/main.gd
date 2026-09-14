@@ -139,6 +139,7 @@ func _start_game() -> void:
 
 func _show_menu() -> void:
 	screen = "menu"
+	title_label.text = "ZOMBIE DEFENSE"
 	title_label.show()
 	health_label.hide()
 	results_label.hide()
