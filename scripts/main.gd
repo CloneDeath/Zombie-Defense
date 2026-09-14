@@ -41,6 +41,8 @@ var survivor_target := Vector2.ZERO
 var survivor_is_walking := false
 var survivor_aim_angle := PI
 var shots: Array[Dictionary] = []
+var map_offset := Vector2.ZERO
+var map_dragging := false
 
 var title_label: Label
 var health_label: Label
@@ -176,7 +178,7 @@ func _spawn_zombie() -> void:
 func _update_zombies(delta: float) -> void:
 	for zombie in zombies.duplicate():
 		if zombie.alerted and survivor_alive and survivor_spawn >= 0:
-			var zombie_position := _zombie_position(zombie)
+			var zombie_position := _zombie_position(zombie) + map_offset
 			var distance := zombie_position.distance_to(survivor_position)
 			var desired_angle := zombie_position.angle_to_point(survivor_position)
 			zombie.aim_angle = rotate_toward(zombie.aim_angle, desired_angle, SURVIVOR_TURN_SPEED * delta)
@@ -283,6 +285,8 @@ func _start_game() -> void:
 	fire_cooldown = 0.0
 	survivor_aim_angle = PI
 	shots.clear()
+	map_offset = Vector2.ZERO
+	map_dragging = false
 	title_label.hide()
 	results_label.hide()
 	begin_button.hide()
@@ -319,35 +323,47 @@ func _input(event: InputEvent) -> void:
 		return
 	if event is InputEventScreenTouch:
 		if event.pressed:
-			_handle_pointer_down(event.position)
+			map_dragging = not _handle_pointer_down(event.position)
 		else:
-			_handle_pointer_up(event.position)
+			if dragging_survivor:
+				_handle_pointer_up(event.position)
+			map_dragging = false
 	elif event is InputEventScreenDrag:
 		if dragging_survivor:
 			drag_position = event.position
-			queue_redraw()
+		elif map_dragging:
+			map_offset += event.relative
+		queue_redraw()
 	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
-			_handle_pointer_down(event.position)
+			map_dragging = not _handle_pointer_down(event.position)
 		else:
-			_handle_pointer_up(event.position)
-	elif event is InputEventMouseMotion and dragging_survivor:
-		drag_position = event.position
+			if dragging_survivor:
+				_handle_pointer_up(event.position)
+			map_dragging = false
+	elif event is InputEventMouseMotion:
+		if dragging_survivor:
+			drag_position = event.position
+		elif map_dragging:
+			map_offset += event.relative
 		queue_redraw()
 
-func _handle_pointer_down(position: Vector2) -> void:
+func _handle_pointer_down(position: Vector2) -> bool:
 	var touched_available_survivor := survivor_spawn < 0 and _survivor_card_rect().has_point(position)
-	var touched_placed_survivor := survivor_spawn >= 0 and survivor_alive and survivor_position.distance_to(position) <= 42.0
+	var touched_placed_survivor := survivor_spawn >= 0 and survivor_alive and (survivor_position + map_offset).distance_to(position) <= 42.0
 	if touched_available_survivor or touched_placed_survivor:
 		survivor_selected = true
 		dragging_survivor = true
 		drag_position = position
 		pointer_down_position = position
 		queue_redraw()
+		return true
 	elif survivor_selected:
 		var index := _spawn_point_at(position)
 		if index >= 0:
 			_set_survivor_destination(index)
+			return true
+	return false
 
 func _handle_pointer_up(position: Vector2) -> void:
 	if not dragging_survivor:
@@ -384,6 +400,7 @@ func _place_survivor(index: int) -> void:
 	queue_redraw()
 
 func _spawn_point_at(position: Vector2) -> int:
+	position -= map_offset
 	var points := _spawn_points()
 	for i in points.size():
 		if points[i].distance_to(position) <= 38.0:
@@ -425,29 +442,31 @@ func _draw() -> void:
 
 	var field := _field_rect()
 	var road := _road_rect()
-	draw_rect(field, Color("#334a35"))
-	draw_rect(road, Color("#5b5a50"))
-	draw_line(Vector2(0, road.position.y), Vector2(size.x, road.position.y), Color("#7b795f"), 4)
-	draw_line(Vector2(0, road.end.y), Vector2(size.x, road.end.y), Color("#7b795f"), 4)
+	draw_rect(Rect2(field.position + map_offset, field.size), Color("#334a35"))
+	draw_rect(Rect2(road.position + map_offset, road.size), Color("#5b5a50"))
+	draw_line(Vector2(map_offset.x, road.position.y + map_offset.y), Vector2(size.x + map_offset.x, road.position.y + map_offset.y), Color("#7b795f"), 4)
+	draw_line(Vector2(map_offset.x, road.end.y + map_offset.y), Vector2(size.x + map_offset.x, road.end.y + map_offset.y), Color("#7b795f"), 4)
 
 	var points := _spawn_points()
 	for i in points.size():
+		var point := points[i] + map_offset
 		var occupied := i == survivor_spawn
 		var point_color := Color("#d9ba58") if survivor_selected and not occupied else Color("#78917a")
-		draw_circle(points[i], 30, Color(point_color, 0.35))
-		draw_arc(points[i], 30, 0, TAU, 32, point_color, 3)
+		draw_circle(point, 30, Color(point_color, 0.35))
+		draw_arc(point, 30, 0, TAU, 32, point_color, 3)
 		if not occupied:
-			draw_string(ThemeDB.fallback_font, points[i] + Vector2(-7, 7), "+", HORIZONTAL_ALIGNMENT_CENTER, 14, 22, point_color)
+			draw_string(ThemeDB.fallback_font, point + Vector2(-7, 7), "+", HORIZONTAL_ALIGNMENT_CENTER, 14, 22, point_color)
 
 	if survivor_spawn >= 0:
+		var survivor_screen := survivor_position + map_offset
 		if survivor_alive:
-			draw_circle(survivor_position, _survivor_range(), Color(0.45, 0.72, 0.48, 0.08))
-			draw_arc(survivor_position, _survivor_range(), 0, TAU, 48, Color(0.45, 0.72, 0.48, 0.25), 2)
-		draw_set_transform(survivor_position, survivor_aim_angle)
+			draw_circle(survivor_screen, _survivor_range(), Color(0.45, 0.72, 0.48, 0.08))
+			draw_arc(survivor_screen, _survivor_range(), 0, TAU, 48, Color(0.45, 0.72, 0.48, 0.25), 2)
+		draw_set_transform(survivor_screen, survivor_aim_angle)
 		var survivor_color := Color.WHITE if survivor_alive else Color(0.35, 0.35, 0.35, 1.0)
 		draw_texture_rect(SURVIVOR_TEXTURE, Rect2(Vector2(-38, -32), Vector2(76, 64)), false, survivor_color)
 		draw_set_transform(Vector2.ZERO, 0.0)
-		var survivor_bar := survivor_position + Vector2(-28, -42)
+		var survivor_bar := survivor_screen + Vector2(-28, -42)
 		draw_rect(Rect2(survivor_bar, Vector2(56, 6)), Color("#251f1f"))
 		draw_rect(Rect2(survivor_bar, Vector2(56.0 * survivor_health / SURVIVOR_MAX_HEALTH, 6)), Color("#63d471"))
 
@@ -461,8 +480,8 @@ func _draw() -> void:
 		draw_rect(Rect2(bar_position, Vector2(50.0 * zombie.hp / ZOMBIE_MAX_HEALTH, 6)), Color("#d85a55"))
 
 	for shot in shots:
-		draw_line(shot.start, shot.end, Color("#ffe184"), 3)
-		draw_circle(shot.end, 4, Color("#fff4b0"))
+		draw_line(shot.start + map_offset, shot.end + map_offset, Color("#ffe184"), 3)
+		draw_circle(shot.end + map_offset, 4, Color("#fff4b0"))
 
 	if survivor_spawn < 0:
 		var card := _survivor_card_rect()
