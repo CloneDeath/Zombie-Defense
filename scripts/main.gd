@@ -339,7 +339,11 @@ func _input(event: InputEvent) -> void:
 				dragging_survivor = false
 				pinch_distance = _touch_distance()
 		else:
+			if active_touches.size() == 1 and dragging_survivor:
+				_handle_pointer_up(event.position)
 			active_touches.erase(event.index)
+			if active_touches.size() < 2:
+				pinch_distance = 0.0
 			if active_touches.is_empty():
 				map_dragging = false
 			elif active_touches.size() == 1:
