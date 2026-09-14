@@ -30,7 +30,8 @@ const BASEBALL_WAIT_DISTANCE_METERS := 1.5
 const BASEBALL_SPEED := 95.0
 const BASEBALL_ATTACK_RATE := 0.8
 const BASEBALL_DAMAGE := 0.5
-const BASEBALL_KNOCKBACK := 72.0
+const BASEBALL_KNOCKBACK_SPEED := 420.0
+const ZOMBIE_KNOCKBACK_DECELERATION := 1225.0
 const BASEBALL_AOE_METERS := 1.15
 const BASEBALL_SWING_DURATION := 0.28
 const ZOMBIE_MAX_HEALTH := 3
@@ -247,6 +248,7 @@ func _spawn_zombie() -> void:
 		"hp": ZOMBIE_MAX_HEALTH,
 		"speed_multiplier": randf_range(0.85, 1.15),
 		"movement_factor": 1.0,
+		"knockback_velocity": Vector2.ZERO,
 		"target_id": "",
 		"attack_cooldown": 0.0,
 		"aim_angle": 0.0
@@ -259,6 +261,15 @@ func _update_zombies(delta: float) -> void:
 			1.0,
 			ZOMBIE_ACCELERATION * delta
 		)
+		var knockback_velocity: Vector2 = zombie.knockback_velocity
+		if not knockback_velocity.is_zero_approx():
+			var knocked_position := _zombie_position(zombie) + knockback_velocity * delta
+			zombie.x = knocked_position.x / _map_size().x
+			zombie.y = knocked_position.y
+			zombie.knockback_velocity = knockback_velocity.move_toward(
+				Vector2.ZERO,
+				ZOMBIE_KNOCKBACK_DECELERATION * delta
+			)
 		var target_id := String(zombie.target_id)
 		if target_id != "" and not _survivor_target_alive(target_id):
 			zombie.target_id = ""
@@ -473,9 +484,7 @@ func _swing_bat(target: Dictionary) -> void:
 		if String(zombie.target_id) == "":
 			zombie.target_id = "baseball"
 		var knockback_direction := baseball_position.direction_to(target_position)
-		var knocked_position := target_position + knockback_direction * BASEBALL_KNOCKBACK
-		zombie.x = knocked_position.x / _map_size().x
-		zombie.y = knocked_position.y
+		zombie.knockback_velocity = knockback_direction * BASEBALL_KNOCKBACK_SPEED
 		zombie.movement_factor = 0.02
 		zombie.hp -= BASEBALL_DAMAGE
 		for i in 4:
