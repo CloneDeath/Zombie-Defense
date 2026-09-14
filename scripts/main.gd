@@ -44,6 +44,9 @@ var shots: Array[Dictionary] = []
 var map_offset := Vector2.ZERO
 var map_dragging := false
 var map_drag_position := Vector2.ZERO
+var map_zoom := 1.0
+var active_touches := {}
+var pinch_distance := 0.0
 
 var title_label: Label
 var health_label: Label
@@ -288,6 +291,8 @@ func _start_game() -> void:
 	shots.clear()
 	map_offset = Vector2.ZERO
 	map_dragging = false
+	map_zoom = 1.0
+	active_touches.clear()
 	title_label.hide()
 	results_label.hide()
 	begin_button.hide()
@@ -322,29 +327,49 @@ func _show_results() -> void:
 func _input(event: InputEvent) -> void:
 	if screen != "playing":
 		return
+
 	if event is InputEventScreenTouch:
 		if event.pressed:
-			map_dragging = not _handle_pointer_down(event.position)
-			map_drag_position = event.position
+			active_touches[event.index] = event.position
+			if active_touches.size() == 1:
+				map_dragging = not _handle_pointer_down(event.position)
+				map_drag_position = event.position
+			elif active_touches.size() == 2:
+				map_dragging = false
+				dragging_survivor = false
+				pinch_distance = _touch_distance()
 		else:
-			if dragging_survivor:
-				_handle_pointer_up(event.position)
-			map_dragging = false
+			active_touches.erase(event.index)
+			if active_touches.is_empty():
+				map_dragging = false
+			elif active_touches.size() == 1:
+				map_drag_position = active_touches.values()[0]
 	elif event is InputEventScreenDrag:
-		if dragging_survivor:
+		active_touches[event.index] = event.position
+		if active_touches.size() >= 2:
+			var new_distance := _touch_distance()
+			if pinch_distance > 0.0:
+				_zoom_at(_touch_center(), map_zoom * new_distance / pinch_distance)
+			pinch_distance = new_distance
+		elif dragging_survivor:
 			drag_position = event.position
 		elif map_dragging:
 			map_offset += event.position - map_drag_position
 			map_drag_position = event.position
 		queue_redraw()
-	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
-		if event.pressed:
-			map_dragging = not _handle_pointer_down(event.position)
-			map_drag_position = event.position
-		else:
-			if dragging_survivor:
-				_handle_pointer_up(event.position)
-			map_dragging = false
+	elif event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
+			_zoom_at(event.position, map_zoom * 1.12)
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
+			_zoom_at(event.position, map_zoom / 1.12)
+		elif event.button_index == MOUSE_BUTTON_LEFT:
+			if event.pressed:
+				map_dragging = not _handle_pointer_down(event.position)
+				map_drag_position = event.position
+			else:
+				if dragging_survivor:
+					_handle_pointer_up(event.position)
+				map_dragging = false
 	elif event is InputEventMouseMotion:
 		if dragging_survivor:
 			drag_position = event.position
@@ -353,9 +378,29 @@ func _input(event: InputEvent) -> void:
 			map_drag_position = event.position
 		queue_redraw()
 
+func _touch_distance() -> float:
+	var touches := active_touches.values()
+	return touches[0].distance_to(touches[1])
+
+func _touch_center() -> Vector2:
+	var touches := active_touches.values()
+	return (touches[0] + touches[1]) * 0.5
+
+func _zoom_at(screen_position: Vector2, new_zoom: float) -> void:
+	var map_position := _screen_to_map(screen_position)
+	map_zoom = clampf(new_zoom, 0.55, 2.0)
+	map_offset = screen_position - map_position * map_zoom
+	queue_redraw()
+
+func _map_to_screen(map_position: Vector2) -> Vector2:
+	return map_position * map_zoom + map_offset
+
+func _screen_to_map(screen_position: Vector2) -> Vector2:
+	return (screen_position - map_offset) / map_zoom
+
 func _handle_pointer_down(position: Vector2) -> bool:
 	var touched_available_survivor := survivor_spawn < 0 and _survivor_card_rect().has_point(position)
-	var touched_placed_survivor := survivor_spawn >= 0 and survivor_alive and (survivor_position + map_offset).distance_to(position) <= 42.0
+	var touched_placed_survivor := survivor_spawn >= 0 and survivor_alive and _map_to_screen(survivor_position).distance_to(position) <= 42.0
 	if touched_available_survivor or touched_placed_survivor:
 		survivor_selected = true
 		dragging_survivor = true
@@ -405,7 +450,7 @@ func _place_survivor(index: int) -> void:
 	queue_redraw()
 
 func _spawn_point_at(position: Vector2) -> int:
-	position -= map_offset
+	position = _screen_to_map(position)
 	var points := _spawn_points()
 	for i in points.size():
 		if points[i].distance_to(position) <= 38.0:
@@ -447,27 +492,27 @@ func _draw() -> void:
 
 	var field := _field_rect()
 	var road := _road_rect()
-	draw_rect(Rect2(field.position + map_offset, field.size), Color("#334a35"))
-	draw_rect(Rect2(road.position + map_offset, road.size), Color("#5b5a50"))
-	draw_line(Vector2(map_offset.x, road.position.y + map_offset.y), Vector2(size.x + map_offset.x, road.position.y + map_offset.y), Color("#7b795f"), 4)
-	draw_line(Vector2(map_offset.x, road.end.y + map_offset.y), Vector2(size.x + map_offset.x, road.end.y + map_offset.y), Color("#7b795f"), 4)
+	draw_rect(Rect2(_map_to_screen(field.position), field.size * map_zoom), Color("#334a35"))
+	draw_rect(Rect2(_map_to_screen(road.position), road.size * map_zoom), Color("#5b5a50"))
+	draw_line(_map_to_screen(Vector2(0, road.position.y)), _map_to_screen(Vector2(size.x, road.position.y)), Color("#7b795f"), 4)
+	draw_line(_map_to_screen(Vector2(0, road.end.y)), _map_to_screen(Vector2(size.x, road.end.y)), Color("#7b795f"), 4)
 
 	var points := _spawn_points()
 	for i in points.size():
-		var point := points[i] + map_offset
+		var point := _map_to_screen(points[i])
 		var occupied := i == survivor_spawn
 		var point_color := Color("#d9ba58") if survivor_selected and not occupied else Color("#78917a")
-		draw_circle(point, 30, Color(point_color, 0.35))
-		draw_arc(point, 30, 0, TAU, 32, point_color, 3)
+		draw_circle(point, 30 * map_zoom, Color(point_color, 0.35))
+		draw_arc(point, 30 * map_zoom, 0, TAU, 32, point_color, 3)
 		if not occupied:
 			draw_string(ThemeDB.fallback_font, point + Vector2(-7, 7), "+", HORIZONTAL_ALIGNMENT_CENTER, 14, 22, point_color)
 
 	if survivor_spawn >= 0:
-		var survivor_screen := survivor_position + map_offset
+		var survivor_screen := _map_to_screen(survivor_position)
 		if survivor_alive:
-			draw_circle(survivor_screen, _survivor_range(), Color(0.45, 0.72, 0.48, 0.08))
-			draw_arc(survivor_screen, _survivor_range(), 0, TAU, 48, Color(0.45, 0.72, 0.48, 0.25), 2)
-		draw_set_transform(survivor_screen, survivor_aim_angle)
+			draw_circle(survivor_screen, _survivor_range() * map_zoom, Color(0.45, 0.72, 0.48, 0.08))
+			draw_arc(survivor_screen, _survivor_range() * map_zoom, 0, TAU, 48, Color(0.45, 0.72, 0.48, 0.25), 2)
+		draw_set_transform(survivor_screen, survivor_aim_angle, Vector2(map_zoom, map_zoom))
 		var survivor_color := Color.WHITE if survivor_alive else Color(0.35, 0.35, 0.35, 1.0)
 		draw_texture_rect(SURVIVOR_TEXTURE, Rect2(Vector2(-38, -32), Vector2(76, 64)), false, survivor_color)
 		draw_set_transform(Vector2.ZERO, 0.0)
@@ -476,8 +521,8 @@ func _draw() -> void:
 		draw_rect(Rect2(survivor_bar, Vector2(56.0 * survivor_health / SURVIVOR_MAX_HEALTH, 6)), Color("#63d471"))
 
 	for zombie in zombies:
-		var zombie_position := _zombie_position(zombie) + map_offset
-		draw_set_transform(zombie_position, zombie.aim_angle)
+		var zombie_position := _map_to_screen(_zombie_position(zombie))
+		draw_set_transform(zombie_position, zombie.aim_angle, Vector2(map_zoom, map_zoom))
 		draw_texture_rect(ZOMBIE_TEXTURE, Rect2(Vector2(-30, -39), Vector2(60, 78)), false)
 		draw_set_transform(Vector2.ZERO, 0.0)
 		var bar_position := zombie_position + Vector2(-25, -47)
@@ -485,8 +530,8 @@ func _draw() -> void:
 		draw_rect(Rect2(bar_position, Vector2(50.0 * zombie.hp / ZOMBIE_MAX_HEALTH, 6)), Color("#d85a55"))
 
 	for shot in shots:
-		draw_line(shot.start + map_offset, shot.end + map_offset, Color("#ffe184"), 3)
-		draw_circle(shot.end + map_offset, 4, Color("#fff4b0"))
+		draw_line(_map_to_screen(shot.start), _map_to_screen(shot.end), Color("#ffe184"), 3)
+		draw_circle(_map_to_screen(shot.end), 4, Color("#fff4b0"))
 
 	if survivor_spawn < 0:
 		var card := _survivor_card_rect()
