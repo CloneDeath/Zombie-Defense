@@ -2,21 +2,35 @@ extends Control
 
 const ZOMBIE_TEXTURE := preload("res://assets/kenney/zombie.png")
 const SURVIVOR_TEXTURE := preload("res://assets/kenney/survivor.png")
+
+const WORLD_SIZE := Vector2(1800, 1000)
+const PATH_POINTS := [
+	Vector2(0, 510), Vector2(330, 510), Vector2(330, 230),
+	Vector2(720, 230), Vector2(720, 760), Vector2(1120, 760),
+	Vector2(1120, 390), Vector2(1480, 390), Vector2(1480, 610),
+	Vector2(1800, 610)
+]
+const SPAWN_POINTS := [
+	Vector2(540, 130), Vector2(900, 650),
+	Vector2(1250, 290), Vector2(1580, 720)
+]
+
 const STARTING_HEALTH := 10
-const ZOMBIE_SPEED := 0.10
+const ZOMBIE_SPEED := 62.0
 const ZOMBIE_CHASE_SPEED := 55.0
+const ZOMBIE_MAX_HEALTH := 3
 const ZOMBIE_ATTACK_RANGE := 34.0
 const ZOMBIE_ATTACK_RATE := 0.8
 const SURVIVOR_MAX_HEALTH := 10
-const ZOMBIE_MAX_HEALTH := 3
-const FIRE_RATE := 0.65
 const SURVIVOR_SPEED := 120.0
-const MAP_WIDTH_METERS := 12.0
-const SURVIVOR_RANGE_METERS := 3.0
-const SURVIVOR_AWARENESS_MULTIPLIER := 2.0
-const SURVIVOR_TURN_SPEED := 2.4
+const SURVIVOR_RANGE := 300.0
+const SURVIVOR_AWARENESS := 600.0
+const FIRE_RATE := 0.65
+const TURN_SPEED := 2.4
 const TIME_BETWEEN_WAVES := 1.5
 const TIME_BETWEEN_ZOMBIES := 0.35
+const MIN_ZOOM := 0.42
+const MAX_ZOOM := 1.5
 
 var screen := "menu"
 var health := STARTING_HEALTH
@@ -31,16 +45,21 @@ var spawn_delay := 0.0
 var survivor_spawn := -1
 var survivor_health := SURVIVOR_MAX_HEALTH
 var survivor_alive := true
+var survivor_position := Vector2.ZERO
+var survivor_target := Vector2.ZERO
+var survivor_aim_angle := PI
 var survivor_selected := false
 var dragging_survivor := false
 var drag_position := Vector2.ZERO
 var pointer_down_position := Vector2.ZERO
 var fire_cooldown := 0.0
-var survivor_position := Vector2.ZERO
-var survivor_target := Vector2.ZERO
-var survivor_is_walking := false
-var survivor_aim_angle := PI
 var shots: Array[Dictionary] = []
+
+var camera_zoom := 0.7
+var camera_offset := Vector2.ZERO
+var camera_dragging := false
+var active_touches := {}
+var pinch_distance := 0.0
 
 var title_label: Label
 var health_label: Label
@@ -100,6 +119,7 @@ func _make_button(button_text: String) -> Button:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_RESIZED and is_node_ready():
 		_layout_ui()
+		_clamp_camera()
 		queue_redraw()
 
 func _layout_ui() -> void:
@@ -110,9 +130,9 @@ func _layout_ui() -> void:
 	title_label.add_theme_font_size_override("font_size", 32 if portrait else 38)
 	version_label.position = Vector2(size.x - 225, 8)
 	version_label.size = Vector2(210, 22)
-	health_label.position = Vector2(10, 45)
+	health_label.position = Vector2(10, 38)
 	health_label.size = Vector2(size.x - 20, 40)
-	health_label.add_theme_font_size_override("font_size", 20 if portrait else 24)
+	health_label.add_theme_font_size_override("font_size", 17 if portrait else 22)
 	results_label.position = Vector2(10, size.y * (0.38 if portrait else 0.36))
 	results_label.size = Vector2(size.x - 20, 76)
 	begin_button.position = Vector2(center_x - 100, size.y * 0.52)
@@ -131,18 +151,15 @@ func _layout_ui() -> void:
 func _process(delta: float) -> void:
 	if screen != "playing":
 		return
-
 	_update_wave(delta)
 	_update_zombies(delta)
 	if screen != "playing":
 		return
 	_update_survivor(delta)
-
 	for shot in shots.duplicate():
 		shot.life -= delta
 		if shot.life <= 0.0:
 			shots.erase(shot)
-
 	var survivor_status := "%d" % survivor_health if survivor_spawn >= 0 and survivor_alive else ("DEAD" if survivor_spawn >= 0 else "—")
 	health_label.text = "TOWN: %d    SURVIVOR: %s    WAVE: %d" % [health, survivor_status, wave]
 	queue_redraw()
@@ -163,10 +180,9 @@ func _update_wave(delta: float) -> void:
 			wave_delay = TIME_BETWEEN_WAVES
 
 func _spawn_zombie() -> void:
-	var road := _road_rect()
 	zombies.append({
-		"x": -0.1,
-		"y": road.position.y + road.size.y * 0.5,
+		"progress": 0.0,
+		"position": PATH_POINTS[0],
 		"hp": ZOMBIE_MAX_HEALTH,
 		"alerted": false,
 		"attack_cooldown": 0.0,
@@ -176,14 +192,11 @@ func _spawn_zombie() -> void:
 func _update_zombies(delta: float) -> void:
 	for zombie in zombies.duplicate():
 		if zombie.alerted and survivor_alive and survivor_spawn >= 0:
-			var zombie_position := _zombie_position(zombie)
-			var distance := zombie_position.distance_to(survivor_position)
-			var desired_angle := zombie_position.angle_to_point(survivor_position)
-			zombie.aim_angle = rotate_toward(zombie.aim_angle, desired_angle, SURVIVOR_TURN_SPEED * delta)
+			var distance := zombie.position.distance_to(survivor_position)
+			var desired_angle := zombie.position.angle_to_point(survivor_position)
+			zombie.aim_angle = rotate_toward(zombie.aim_angle, desired_angle, TURN_SPEED * delta)
 			if distance > ZOMBIE_ATTACK_RANGE:
-				var direction := zombie_position.direction_to(survivor_position)
-				zombie.x += direction.x * ZOMBIE_CHASE_SPEED * delta / size.x
-				zombie.y += direction.y * ZOMBIE_CHASE_SPEED * delta
+				zombie.position = zombie.position.move_toward(survivor_position, ZOMBIE_CHASE_SPEED * delta)
 			else:
 				zombie.attack_cooldown -= delta
 				if zombie.attack_cooldown <= 0.0:
@@ -192,61 +205,67 @@ func _update_zombies(delta: float) -> void:
 					if survivor_health <= 0:
 						_kill_survivor()
 		else:
-			zombie.aim_angle = rotate_toward(zombie.aim_angle, 0.0, SURVIVOR_TURN_SPEED * delta)
-			zombie.x += ZOMBIE_SPEED * delta
+			zombie.progress += ZOMBIE_SPEED * delta
+			var path_sample := _sample_path(zombie.progress)
+			zombie.position = path_sample.position
+			zombie.aim_angle = rotate_toward(zombie.aim_angle, path_sample.angle, TURN_SPEED * delta)
+			if path_sample.finished:
+				zombies.erase(zombie)
+				zombies_passed += 1
+				health -= 1
+				if health <= 0:
+					_show_results()
+					return
 
-		if zombie.x > 1.08:
-			zombies.erase(zombie)
-			zombies_passed += 1
-			health -= 1
-			if health <= 0:
-				_show_results()
-				return
+func _sample_path(distance: float) -> Dictionary:
+	var remaining := distance
+	for i in PATH_POINTS.size() - 1:
+		var start: Vector2 = PATH_POINTS[i]
+		var finish: Vector2 = PATH_POINTS[i + 1]
+		var segment_length := start.distance_to(finish)
+		if remaining <= segment_length:
+			var position := start.lerp(finish, remaining / segment_length)
+			return {"position":position, "angle":start.angle_to_point(finish), "finished":false}
+		remaining -= segment_length
+	var last_angle: float = PATH_POINTS[-2].angle_to_point(PATH_POINTS[-1])
+	return {"position":PATH_POINTS[-1], "angle":last_angle, "finished":true}
 
 func _kill_survivor() -> void:
 	survivor_health = 0
 	survivor_alive = false
 	survivor_selected = false
 	dragging_survivor = false
-	survivor_is_walking = false
 	for zombie in zombies:
 		zombie.alerted = false
 
 func _update_survivor(delta: float) -> void:
 	if survivor_spawn < 0 or not survivor_alive:
 		return
-
-	survivor_target = _spawn_points()[survivor_spawn]
+	survivor_target = SPAWN_POINTS[survivor_spawn]
 	var target := _closest_zombie()
 	var distance_to_zombie := INF
 	if not target.is_empty():
-		distance_to_zombie = survivor_position.distance_to(_zombie_position(target))
+		distance_to_zombie = survivor_position.distance_to(target.position)
 
-	var zombie_in_range := distance_to_zombie <= _survivor_range()
-	var zombie_in_awareness := distance_to_zombie <= _survivor_range() * SURVIVOR_AWARENESS_MULTIPLIER
-	if zombie_in_awareness:
-		var desired_angle := survivor_position.angle_to_point(_zombie_position(target))
-		survivor_aim_angle = rotate_toward(survivor_aim_angle, desired_angle, SURVIVOR_TURN_SPEED * delta)
+	if distance_to_zombie <= SURVIVOR_AWARENESS:
+		var desired_angle := survivor_position.angle_to_point(target.position)
+		survivor_aim_angle = rotate_toward(survivor_aim_angle, desired_angle, TURN_SPEED * delta)
 	elif survivor_position.distance_to(survivor_target) > 1.0:
 		var walk_angle := survivor_position.angle_to_point(survivor_target)
-		survivor_aim_angle = rotate_toward(survivor_aim_angle, walk_angle, SURVIVOR_TURN_SPEED * delta)
+		survivor_aim_angle = rotate_toward(survivor_aim_angle, walk_angle, TURN_SPEED * delta)
 
-	if zombie_in_range:
-		survivor_is_walking = false
+	if distance_to_zombie <= SURVIVOR_RANGE:
 		fire_cooldown -= delta
 		if fire_cooldown <= 0.0:
 			_shoot(target)
 	elif survivor_position.distance_to(survivor_target) > 1.0:
-		survivor_is_walking = true
 		survivor_position = survivor_position.move_toward(survivor_target, SURVIVOR_SPEED * delta)
-	else:
-		survivor_is_walking = false
 
 func _closest_zombie() -> Dictionary:
 	var closest: Dictionary = {}
 	var closest_distance := INF
 	for zombie in zombies:
-		var distance := survivor_position.distance_to(_zombie_position(zombie))
+		var distance := survivor_position.distance_to(zombie.position)
 		if distance < closest_distance:
 			closest = zombie
 			closest_distance = distance
@@ -255,8 +274,7 @@ func _closest_zombie() -> Dictionary:
 func _shoot(target: Dictionary) -> void:
 	if target.is_empty() or not zombies.has(target):
 		return
-	var target_position := _zombie_position(target)
-	shots.append({"start":survivor_position, "end":target_position, "life":0.12})
+	shots.append({"start":survivor_position, "end":target.position, "life":0.12})
 	for zombie in zombies:
 		zombie.alerted = true
 	fire_cooldown = FIRE_RATE
@@ -274,7 +292,6 @@ func _start_game() -> void:
 	wave = 0
 	zombies_left_to_spawn = 0
 	wave_delay = 0.5
-	spawn_delay = 0.0
 	survivor_spawn = -1
 	survivor_health = SURVIVOR_MAX_HEALTH
 	survivor_alive = true
@@ -283,6 +300,7 @@ func _start_game() -> void:
 	fire_cooldown = 0.0
 	survivor_aim_angle = PI
 	shots.clear()
+	_reset_camera()
 	title_label.hide()
 	results_label.hide()
 	begin_button.hide()
@@ -317,44 +335,77 @@ func _show_results() -> void:
 func _input(event: InputEvent) -> void:
 	if screen != "playing":
 		return
+
 	if event is InputEventScreenTouch:
 		if event.pressed:
-			_handle_pointer_down(event.position)
+			active_touches[event.index] = event.position
+			if active_touches.size() == 1:
+				camera_dragging = not _handle_pointer_down(event.position)
+			elif active_touches.size() == 2:
+				dragging_survivor = false
+				camera_dragging = false
+				pinch_distance = _touch_distance()
 		else:
-			_handle_pointer_up(event.position)
+			camera_dragging = false
+		else:
+			if active_touches.size() == 1 and dragging_survivor:
+				_handle_pointer_up(event.position)
+			active_touches.erase(event.index)
+			if active_touches.is_empty():
+				camera_dragging = false
 	elif event is InputEventScreenDrag:
+		active_touches[event.index] = event.position
+		if active_touches.size() >= 2:
+			var new_distance := _touch_distance()
+			if pinch_distance > 0.0:
+				_zoom_at(_touch_center(), camera_zoom * new_distance / pinch_distance)
+			pinch_distance = new_distance
+		elif dragging_survivor:
+			drag_position = event.position
+		elif camera_dragging:
+			camera_offset += event.relative
+			_clamp_camera()
+		queue_redraw()
+	elif event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
+			_zoom_at(event.position, camera_zoom * 1.12)
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
+			_zoom_at(event.position, camera_zoom / 1.12)
+		elif event.button_index == MOUSE_BUTTON_LEFT:
+			if event.pressed:
+				camera_dragging = not _handle_pointer_down(event.position)
+			else:
+				if dragging_survivor:
+					_handle_pointer_up(event.position)
+				camera_dragging = false
+	elif event is InputEventMouseMotion:
 		if dragging_survivor:
 			drag_position = event.position
-			queue_redraw()
-	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
-		if event.pressed:
-			_handle_pointer_down(event.position)
-		else:
-			_handle_pointer_up(event.position)
-	elif event is InputEventMouseMotion and dragging_survivor:
-		drag_position = event.position
+		elif camera_dragging:
+			camera_offset += event.relative
+			_clamp_camera()
 		queue_redraw()
 
-func _handle_pointer_down(position: Vector2) -> void:
-	var touched_available_survivor := survivor_spawn < 0 and _survivor_card_rect().has_point(position)
-	var touched_placed_survivor := survivor_spawn >= 0 and survivor_alive and survivor_position.distance_to(position) <= 42.0
-	if touched_available_survivor or touched_placed_survivor:
+func _handle_pointer_down(position: Vector2) -> bool:
+	var survivor_screen := _world_to_screen(survivor_position)
+	var touched_card := survivor_spawn < 0 and _survivor_card_rect().has_point(position)
+	var touched_survivor := survivor_spawn >= 0 and survivor_alive and survivor_screen.distance_to(position) <= 42.0
+	if touched_card or touched_survivor:
 		survivor_selected = true
 		dragging_survivor = true
 		drag_position = position
 		pointer_down_position = position
 		queue_redraw()
+		return true
 	elif survivor_selected:
 		var index := _spawn_point_at(position)
 		if index >= 0:
 			_set_survivor_destination(index)
+			return true
+	return false
 
 func _handle_pointer_up(position: Vector2) -> void:
-	if not dragging_survivor:
-		return
 	dragging_survivor = false
-
-	# A short press selects him; a drag orders him immediately.
 	if pointer_down_position.distance_to(position) > 10.0:
 		var index := _spawn_point_at(position)
 		if index >= 0:
@@ -363,106 +414,110 @@ func _handle_pointer_up(position: Vector2) -> void:
 
 func _set_survivor_destination(index: int) -> void:
 	if survivor_spawn < 0:
-		_place_survivor(index)
-		return
+		survivor_spawn = index
+		survivor_position = Vector2(WORLD_SIZE.x + 65.0, SPAWN_POINTS[index].y)
+		survivor_aim_angle = PI
 	survivor_spawn = index
-	survivor_target = _spawn_points()[index]
-	survivor_is_walking = survivor_position.distance_to(survivor_target) > 1.0
-	survivor_selected = false
-	dragging_survivor = false
-	queue_redraw()
-
-func _place_survivor(index: int) -> void:
-	survivor_spawn = index
-	survivor_target = _spawn_points()[index]
-	survivor_position = Vector2(size.x + 55.0, survivor_target.y)
-	survivor_aim_angle = PI
-	survivor_is_walking = true
+	survivor_target = SPAWN_POINTS[index]
 	survivor_selected = false
 	dragging_survivor = false
 	fire_cooldown = 0.0
 	queue_redraw()
 
-func _spawn_point_at(position: Vector2) -> int:
-	var points := _spawn_points()
-	for i in points.size():
-		if points[i].distance_to(position) <= 38.0:
+func _spawn_point_at(screen_position: Vector2) -> int:
+	var world_position := _screen_to_world(screen_position)
+	for i in SPAWN_POINTS.size():
+		if SPAWN_POINTS[i].distance_to(world_position) <= 44.0:
 			return i
 	return -1
 
-func _field_rect() -> Rect2:
-	return Rect2(0, 90, size.x, maxf(160.0, size.y - 205.0))
+func _reset_camera() -> void:
+	camera_zoom = clampf(minf(size.x / 900.0, (size.y - 120.0) / 650.0), MIN_ZOOM, 1.0)
+	camera_offset = Vector2(20, 85) - Vector2(180, 300) * camera_zoom
+	_clamp_camera()
 
-func _road_rect() -> Rect2:
-	var field := _field_rect()
-	var road_height := minf(135.0, field.size.y * 0.48)
-	return Rect2(0, field.position.y + (field.size.y - road_height) * 0.5, size.x, road_height)
+func _zoom_at(screen_position: Vector2, new_zoom: float) -> void:
+	var world_before := _screen_to_world(screen_position)
+	camera_zoom = clampf(new_zoom, MIN_ZOOM, MAX_ZOOM)
+	camera_offset = screen_position - world_before * camera_zoom
+	_clamp_camera()
+	queue_redraw()
 
-func _spawn_points() -> Array[Vector2]:
-	var road := _road_rect()
-	var upper_y := maxf(_field_rect().position.y + 32.0, road.position.y - 34.0)
-	var lower_y := minf(_field_rect().end.y - 32.0, road.end.y + 34.0)
-	return [
-		Vector2(size.x * 0.35, upper_y),
-		Vector2(size.x * 0.65, upper_y),
-		Vector2(size.x * 0.35, lower_y),
-		Vector2(size.x * 0.65, lower_y)
-	]
+func _clamp_camera() -> void:
+	var top := 78.0
+	var bottom := size.y - 112.0
+	var scaled := WORLD_SIZE * camera_zoom
+	if scaled.x <= size.x:
+		camera_offset.x = (size.x - scaled.x) * 0.5
+	else:
+		camera_offset.x = clampf(camera_offset.x, size.x - scaled.x, 0.0)
+	if scaled.y <= bottom - top:
+		camera_offset.y = top + (bottom - top - scaled.y) * 0.5
+	else:
+		camera_offset.y = clampf(camera_offset.y, bottom - scaled.y, top)
+
+func _touch_distance() -> float:
+	var values := active_touches.values()
+	return values[0].distance_to(values[1])
+
+func _touch_center() -> Vector2:
+	var values := active_touches.values()
+	return (values[0] + values[1]) * 0.5
+
+func _world_to_screen(world_position: Vector2) -> Vector2:
+	return world_position * camera_zoom + camera_offset
+
+func _screen_to_world(screen_position: Vector2) -> Vector2:
+	return (screen_position - camera_offset) / camera_zoom
 
 func _survivor_card_rect() -> Rect2:
 	return Rect2(size.x * 0.5 - 52, size.y - 105, 104, 92)
-
-func _zombie_position(zombie: Dictionary) -> Vector2:
-	return Vector2(zombie.x * size.x, zombie.y)
-
-func _survivor_range() -> float:
-	return size.x / MAP_WIDTH_METERS * SURVIVOR_RANGE_METERS
 
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), Color("#111812"))
 	if screen != "playing":
 		return
 
-	var field := _field_rect()
-	var road := _road_rect()
-	draw_rect(field, Color("#334a35"))
-	draw_rect(road, Color("#5b5a50"))
-	draw_line(Vector2(0, road.position.y), Vector2(size.x, road.position.y), Color("#7b795f"), 4)
-	draw_line(Vector2(0, road.end.y), Vector2(size.x, road.end.y), Color("#7b795f"), 4)
+	draw_set_transform(camera_offset, 0.0, Vector2(camera_zoom, camera_zoom))
+	draw_rect(Rect2(Vector2.ZERO, WORLD_SIZE), Color("#334a35"))
+	draw_polyline(PackedVector2Array(PATH_POINTS), Color("#777565"), 116.0, true)
+	draw_polyline(PackedVector2Array(PATH_POINTS), Color("#a09d87"), 6.0, true)
 
-	var points := _spawn_points()
-	for i in points.size():
+	for i in SPAWN_POINTS.size():
 		var occupied := i == survivor_spawn
 		var point_color := Color("#d9ba58") if survivor_selected and not occupied else Color("#78917a")
-		draw_circle(points[i], 30, Color(point_color, 0.35))
-		draw_arc(points[i], 30, 0, TAU, 32, point_color, 3)
+		draw_circle(SPAWN_POINTS[i], 34, Color(point_color, 0.35))
+		draw_arc(SPAWN_POINTS[i], 34, 0, TAU, 32, point_color, 3.0 / camera_zoom)
 		if not occupied:
-			draw_string(ThemeDB.fallback_font, points[i] + Vector2(-7, 7), "+", HORIZONTAL_ALIGNMENT_CENTER, 14, 22, point_color)
+			draw_string(ThemeDB.fallback_font, SPAWN_POINTS[i] + Vector2(-8, 8), "+", HORIZONTAL_ALIGNMENT_CENTER, 16, 24, point_color)
 
 	if survivor_spawn >= 0:
 		if survivor_alive:
-			draw_circle(survivor_position, _survivor_range(), Color(0.45, 0.72, 0.48, 0.08))
-			draw_arc(survivor_position, _survivor_range(), 0, TAU, 48, Color(0.45, 0.72, 0.48, 0.25), 2)
-		draw_set_transform(survivor_position, survivor_aim_angle)
-		var survivor_color := Color.WHITE if survivor_alive else Color(0.35, 0.35, 0.35, 1.0)
+			draw_circle(survivor_position, SURVIVOR_RANGE, Color(0.45, 0.72, 0.48, 0.07))
+			draw_arc(survivor_position, SURVIVOR_RANGE, 0, TAU, 48, Color(0.45, 0.72, 0.48, 0.25), 2.0 / camera_zoom)
+		draw_set_transform(camera_offset + survivor_position * camera_zoom, survivor_aim_angle, Vector2(camera_zoom, camera_zoom))
+		var survivor_color := Color.WHITE if survivor_alive else Color(0.35, 0.35, 0.35, 1)
 		draw_texture_rect(SURVIVOR_TEXTURE, Rect2(Vector2(-38, -32), Vector2(76, 64)), false, survivor_color)
-		draw_set_transform(Vector2.ZERO, 0.0)
+		draw_set_transform(camera_offset, 0.0, Vector2(camera_zoom, camera_zoom))
 		var survivor_bar := survivor_position + Vector2(-28, -42)
 		draw_rect(Rect2(survivor_bar, Vector2(56, 6)), Color("#251f1f"))
 		draw_rect(Rect2(survivor_bar, Vector2(56.0 * survivor_health / SURVIVOR_MAX_HEALTH, 6)), Color("#63d471"))
 
 	for zombie in zombies:
-		var zombie_position := _zombie_position(zombie)
-		draw_set_transform(zombie_position, zombie.aim_angle)
+		draw_set_transform(camera_offset + zombie.position * camera_zoom, zombie.aim_angle, Vector2(camera_zoom, camera_zoom))
 		draw_texture_rect(ZOMBIE_TEXTURE, Rect2(Vector2(-30, -39), Vector2(60, 78)), false)
-		draw_set_transform(Vector2.ZERO, 0.0)
-		var bar_position := zombie_position + Vector2(-25, -47)
+		draw_set_transform(camera_offset, 0.0, Vector2(camera_zoom, camera_zoom))
+		var bar_position: Vector2 = zombie.position + Vector2(-25, -47)
 		draw_rect(Rect2(bar_position, Vector2(50, 6)), Color("#251f1f"))
 		draw_rect(Rect2(bar_position, Vector2(50.0 * zombie.hp / ZOMBIE_MAX_HEALTH, 6)), Color("#d85a55"))
 
 	for shot in shots:
-		draw_line(shot.start, shot.end, Color("#ffe184"), 3)
-		draw_circle(shot.end, 4, Color("#fff4b0"))
+		draw_line(shot.start, shot.end, Color("#ffe184"), 3.0 / camera_zoom)
+		draw_circle(shot.end, 4.0 / camera_zoom, Color("#fff4b0"))
+
+	draw_set_transform(Vector2.ZERO, 0.0)
+	draw_rect(Rect2(0, 0, size.x, 78), Color("#111812"))
+	draw_rect(Rect2(0, size.y - 112, size.x, 112), Color("#111812"))
 
 	if survivor_spawn < 0:
 		var card := _survivor_card_rect()
