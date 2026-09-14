@@ -37,6 +37,7 @@ jobs:
           mkdir -p /tmp/kenney assets/kenney
           unzip -q /tmp/kenney.zip -d /tmp/kenney
           find /tmp/kenney -type f -name manBlue_gun.png -exec cp {} assets/kenney/survivor.png \;
+          find /tmp/kenney -type f -name manBrown_hold.png -exec cp {} assets/kenney/baseball.png \;
           find /tmp/kenney -type f -name soldier1_machine.png -exec cp {} assets/kenney/soldier.png \;
           find /tmp/kenney -type f -name womanGreen_silencer.png -exec cp {} assets/kenney/scout.png \;
           find /tmp/kenney -type f -name zoimbie1_stand.png -exec cp {} assets/kenney/zombie.png \;
@@ -44,6 +45,7 @@ jobs:
           find /tmp/kenney -type f -path "*/Tiles/tile_28.png" -exec cp {} assets/kenney/road.png \;
           find /tmp/kenney -type f -path "*/Tiles/tile_271.png" -exec cp {} assets/kenney/sidewalk.png \;
           test -f assets/kenney/survivor.png
+          test -f assets/kenney/baseball.png
           test -f assets/kenney/soldier.png
           test -f assets/kenney/scout.png
           test -f assets/kenney/zombie.png
