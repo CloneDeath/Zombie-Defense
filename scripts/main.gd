@@ -6,6 +6,9 @@ const STARTING_HEALTH := 10
 const ZOMBIE_SPEED := 0.16
 const ZOMBIE_MAX_HEALTH := 3
 const FIRE_RATE := 0.65
+const SURVIVOR_SPEED := 120.0
+const MAP_WIDTH_METERS := 12.0
+const SURVIVOR_RANGE_METERS := 3.0
 
 var screen := "menu"
 var health := STARTING_HEALTH
@@ -21,6 +24,9 @@ var survivor_selected := false
 var dragging_survivor := false
 var drag_position := Vector2.ZERO
 var fire_cooldown := 0.0
+var survivor_position := Vector2.ZERO
+var survivor_target := Vector2.ZERO
+var survivor_is_walking := false
 var shots: Array[Dictionary] = []
 
 var title_label: Label
@@ -117,9 +123,18 @@ func _process(delta: float) -> void:
 	if zombie_active:
 		zombie_x += ZOMBIE_SPEED * delta
 		if survivor_spawn >= 0:
-			fire_cooldown -= delta
-			if fire_cooldown <= 0.0:
-				_shoot()
+			survivor_target = _spawn_points()[survivor_spawn]
+			var zombie_in_range := survivor_position.distance_to(_zombie_position()) <= _survivor_range()
+			if zombie_in_range:
+				survivor_is_walking = false
+				fire_cooldown -= delta
+				if fire_cooldown <= 0.0:
+					_shoot()
+			elif survivor_position.distance_to(survivor_target) > 1.0:
+				survivor_is_walking = true
+				survivor_position = survivor_position.move_toward(survivor_target, SURVIVOR_SPEED * delta)
+			else:
+				survivor_is_walking = false
 		if zombie_x > 1.08:
 			zombie_active = false
 			zombies_passed += 1
@@ -149,7 +164,7 @@ func _spawn_zombie() -> void:
 
 func _shoot() -> void:
 	var points := _spawn_points()
-	var start: Vector2 = points[survivor_spawn]
+	var start := survivor_position
 	var target := _zombie_position()
 	shots.append({"start":start, "end":target, "life":0.12})
 	fire_cooldown = FIRE_RATE
@@ -249,6 +264,9 @@ func _handle_pointer_up(position: Vector2) -> void:
 
 func _place_survivor(index: int) -> void:
 	survivor_spawn = index
+	survivor_target = _spawn_points()[index]
+	survivor_position = Vector2(size.x + 55.0, survivor_target.y)
+	survivor_is_walking = true
 	survivor_selected = false
 	dragging_survivor = false
 	fire_cooldown = 0.0
@@ -287,6 +305,9 @@ func _zombie_position() -> Vector2:
 	var road := _road_rect()
 	return Vector2(zombie_x * size.x, road.position.y + road.size.y * 0.5)
 
+func _survivor_range() -> float:
+	return size.x / MAP_WIDTH_METERS * SURVIVOR_RANGE_METERS
+
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), Color("#111812"))
 
@@ -310,12 +331,22 @@ func _draw() -> void:
 			draw_string(ThemeDB.fallback_font, points[i] + Vector2(-7, 7), "+", HORIZONTAL_ALIGNMENT_CENTER, 14, 22, point_color)
 
 	if survivor_spawn >= 0:
-		var survivor_position := points[survivor_spawn]
+		draw_circle(survivor_position, _survivor_range(), Color(0.45, 0.72, 0.48, 0.08))
+		draw_arc(survivor_position, _survivor_range(), 0, TAU, 48, Color(0.45, 0.72, 0.48, 0.25), 2)
+
+		var aim_angle := 0.0
+		if zombie_active and survivor_position.distance_to(_zombie_position()) <= _survivor_range():
+			aim_angle = survivor_position.angle_to_point(_zombie_position())
+		elif survivor_is_walking:
+			aim_angle = survivor_position.angle_to_point(survivor_target)
+
+		draw_set_transform(survivor_position, aim_angle)
 		draw_texture_rect(
 			SURVIVOR_TEXTURE,
-			Rect2(survivor_position - Vector2(38, 32), Vector2(76, 64)),
+			Rect2(Vector2(-38, -32), Vector2(76, 64)),
 			false
 		)
+		draw_set_transform(Vector2.ZERO, 0.0)
 
 	if zombie_active:
 		var zombie_position := _zombie_position()
@@ -338,7 +369,7 @@ func _draw() -> void:
 		draw_rect(card, card_color)
 		draw_rect(card, Color("#9fba9e"), false, 2)
 		draw_texture_rect(SURVIVOR_TEXTURE, Rect2(card.position + Vector2(23, 5), Vector2(58, 49)), false)
-		draw_string(ThemeDB.fallback_font, card.position + Vector2(16, 78), "SURVIVOR", HORIZONTAL_ALIGNMENT_CENTER, 72, 14, Color.WHITE)
+		draw_string(ThemeDB.fallback_font, card.position + Vector2(10, 78), "SURVIVOR • 3m", HORIZONTAL_ALIGNMENT_CENTER, 84, 13, Color.WHITE)
 
 	if dragging_survivor:
 		draw_texture_rect(
