@@ -30,6 +30,19 @@ jobs:
         run: |
           mkdir -p /github/home/.local/share/godot/export_templates
           cp -r /root/.local/share/godot/export_templates/4.3.stable /github/home/.local/share/godot/export_templates/
+      - name: Fetch Kenney Top-down Shooter sprites
+        run: |
+          curl -L "https://opengameart.org/sites/default/files/topdown-shooter.zip" -o /tmp/kenney.zip
+          mkdir -p /tmp/kenney assets/kenney
+          unzip -q /tmp/kenney.zip -d /tmp/kenney
+          find /tmp/kenney -type f -name survivor1_gun.png -exec cp {} assets/kenney/survivor.png \;
+          find /tmp/kenney -type f -name soldier1_machine.png -exec cp {} assets/kenney/soldier.png \;
+          find /tmp/kenney -type f -name womanGreen_silencer.png -exec cp {} assets/kenney/scout.png \;
+          find /tmp/kenney -type f -name zoimbie1_stand.png -exec cp {} assets/kenney/zombie.png \;
+          test -f assets/kenney/survivor.png
+          test -f assets/kenney/soldier.png
+          test -f assets/kenney/scout.png
+          test -f assets/kenney/zombie.png
       - name: Export web build
         run: |
           mkdir -p build/web
