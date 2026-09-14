@@ -11,15 +11,18 @@ const MAP_WIDTH_METERS := 12.0
 const SURVIVOR_RANGE_METERS := 3.0
 const SURVIVOR_AWARENESS_MULTIPLIER := 2.0
 const SURVIVOR_TURN_SPEED := 2.4
+const TIME_BETWEEN_WAVES := 1.5
+const TIME_BETWEEN_ZOMBIES := 0.35
 
 var screen := "menu"
 var health := STARTING_HEALTH
 var zombies_passed := 0
 var zombies_killed := 0
-var zombie_x := -0.1
-var zombie_health := ZOMBIE_MAX_HEALTH
-var spawn_delay := 0.6
-var zombie_active := false
+var zombies: Array[Dictionary] = []
+var wave := 0
+var zombies_left_to_spawn := 0
+var wave_delay := 0.5
+var spawn_delay := 0.0
 
 var survivor_spawn := -1
 var survivor_selected := false
@@ -44,13 +47,10 @@ func _ready() -> void:
 	title_label = _make_label(38, Color.WHITE)
 	title_label.text = "ZOMBIE DEFENSE"
 	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-
 	health_label = _make_label(24, Color("#f5e8c8"))
 	health_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-
 	results_label = _make_label(24, Color.WHITE)
 	results_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-
 	version_label = _make_label(12, Color("#a8b5a5"))
 	version_label.text = "%s • %s" % [BuildVersion.BRANCH, BuildVersion.COMMIT]
 	version_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -61,7 +61,6 @@ func _ready() -> void:
 	retry_button.pressed.connect(_start_game)
 	menu_button = _make_button("BACK TO MENU")
 	menu_button.pressed.connect(_show_menu)
-
 	_show_menu()
 	_layout_ui()
 
@@ -102,20 +101,15 @@ func _layout_ui() -> void:
 	title_label.position = Vector2(10, size.y * (0.22 if portrait else 0.18))
 	title_label.size = Vector2(size.x - 20, 55)
 	title_label.add_theme_font_size_override("font_size", 32 if portrait else 38)
-
 	version_label.position = Vector2(size.x - 225, 8)
 	version_label.size = Vector2(210, 22)
-
 	health_label.position = Vector2(10, 45)
 	health_label.size = Vector2(size.x - 20, 40)
 	health_label.add_theme_font_size_override("font_size", 20 if portrait else 24)
-
 	results_label.position = Vector2(10, size.y * (0.38 if portrait else 0.36))
 	results_label.size = Vector2(size.x - 20, 76)
-
 	begin_button.position = Vector2(center_x - 100, size.y * 0.52)
 	begin_button.size = Vector2(200, 58)
-
 	if portrait:
 		retry_button.position = Vector2(center_x - 100, size.y * 0.56)
 		retry_button.size = Vector2(200, 58)
@@ -131,21 +125,10 @@ func _process(delta: float) -> void:
 	if screen != "playing":
 		return
 
-	if zombie_active:
-		zombie_x += ZOMBIE_SPEED * delta
-		if zombie_x > 1.08:
-			zombie_active = false
-			zombies_passed += 1
-			health -= 1
-			if health <= 0:
-				_show_results()
-			else:
-				spawn_delay = 0.55
-	else:
-		spawn_delay -= delta
-		if spawn_delay <= 0.0:
-			_spawn_zombie()
-
+	_update_wave(delta)
+	_update_zombies(delta)
+	if screen != "playing":
+		return
 	_update_survivor(delta)
 
 	for shot in shots.duplicate():
@@ -153,29 +136,55 @@ func _process(delta: float) -> void:
 		if shot.life <= 0.0:
 			shots.erase(shot)
 
-	health_label.text = "TOWN HEALTH: %d    KILLED: %d" % [health, zombies_killed]
+	health_label.text = "HEALTH: %d    WAVE: %d    KILLED: %d" % [health, wave, zombies_killed]
 	queue_redraw()
 
+func _update_wave(delta: float) -> void:
+	if zombies_left_to_spawn > 0:
+		spawn_delay -= delta
+		if spawn_delay <= 0.0:
+			_spawn_zombie()
+			zombies_left_to_spawn -= 1
+			spawn_delay = TIME_BETWEEN_ZOMBIES
+	elif zombies.is_empty():
+		wave_delay -= delta
+		if wave_delay <= 0.0:
+			wave += 1
+			zombies_left_to_spawn = 1 if wave <= 2 else wave - 1
+			spawn_delay = 0.0
+			wave_delay = TIME_BETWEEN_WAVES
+
 func _spawn_zombie() -> void:
-	zombie_x = -0.1
-	zombie_health = ZOMBIE_MAX_HEALTH
-	zombie_active = true
-	fire_cooldown = 0.15
+	zombies.append({
+		"x": -0.1,
+		"hp": ZOMBIE_MAX_HEALTH
+	})
+
+func _update_zombies(delta: float) -> void:
+	for zombie in zombies.duplicate():
+		zombie.x += ZOMBIE_SPEED * delta
+		if zombie.x > 1.08:
+			zombies.erase(zombie)
+			zombies_passed += 1
+			health -= 1
+			if health <= 0:
+				_show_results()
+				return
 
 func _update_survivor(delta: float) -> void:
 	if survivor_spawn < 0:
 		return
 
 	survivor_target = _spawn_points()[survivor_spawn]
+	var target := _closest_zombie()
 	var distance_to_zombie := INF
-	if zombie_active:
-		distance_to_zombie = survivor_position.distance_to(_zombie_position())
+	if not target.is_empty():
+		distance_to_zombie = survivor_position.distance_to(_zombie_position(target))
 
 	var zombie_in_range := distance_to_zombie <= _survivor_range()
 	var zombie_in_awareness := distance_to_zombie <= _survivor_range() * SURVIVOR_AWARENESS_MULTIPLIER
-
 	if zombie_in_awareness:
-		var desired_angle := survivor_position.angle_to_point(_zombie_position())
+		var desired_angle := survivor_position.angle_to_point(_zombie_position(target))
 		survivor_aim_angle = rotate_toward(survivor_aim_angle, desired_angle, SURVIVOR_TURN_SPEED * delta)
 	elif survivor_position.distance_to(survivor_target) > 1.0:
 		var walk_angle := survivor_position.angle_to_point(survivor_target)
@@ -185,37 +194,49 @@ func _update_survivor(delta: float) -> void:
 		survivor_is_walking = false
 		fire_cooldown -= delta
 		if fire_cooldown <= 0.0:
-			_shoot()
+			_shoot(target)
 	elif survivor_position.distance_to(survivor_target) > 1.0:
 		survivor_is_walking = true
 		survivor_position = survivor_position.move_toward(survivor_target, SURVIVOR_SPEED * delta)
 	else:
 		survivor_is_walking = false
 
-func _shoot() -> void:
-	var points := _spawn_points()
-	var start := survivor_position
-	var target := _zombie_position()
-	shots.append({"start":start, "end":target, "life":0.12})
+func _closest_zombie() -> Dictionary:
+	var closest: Dictionary = {}
+	var closest_distance := INF
+	for zombie in zombies:
+		var distance := survivor_position.distance_to(_zombie_position(zombie))
+		if distance < closest_distance:
+			closest = zombie
+			closest_distance = distance
+	return closest
+
+func _shoot(target: Dictionary) -> void:
+	if target.is_empty() or not zombies.has(target):
+		return
+	var target_position := _zombie_position(target)
+	shots.append({"start":survivor_position, "end":target_position, "life":0.12})
 	fire_cooldown = FIRE_RATE
-	zombie_health -= 1
-	if zombie_health <= 0:
-		zombie_active = false
+	target.hp -= 1
+	if target.hp <= 0:
+		zombies.erase(target)
 		zombies_killed += 1
-		spawn_delay = 0.6
 
 func _start_game() -> void:
 	screen = "playing"
 	health = STARTING_HEALTH
 	zombies_passed = 0
 	zombies_killed = 0
-	zombie_x = -0.1
-	spawn_delay = 0.5
-	zombie_active = false
+	zombies.clear()
+	wave = 0
+	zombies_left_to_spawn = 0
+	wave_delay = 0.5
+	spawn_delay = 0.0
 	survivor_spawn = -1
 	survivor_selected = false
 	dragging_survivor = false
 	fire_cooldown = 0.0
+	survivor_aim_angle = PI
 	shots.clear()
 	title_label.hide()
 	results_label.hide()
@@ -223,7 +244,6 @@ func _start_game() -> void:
 	retry_button.hide()
 	menu_button.hide()
 	health_label.show()
-	health_label.text = "TOWN HEALTH: %d    KILLED: 0" % health
 	queue_redraw()
 
 func _show_menu() -> void:
@@ -239,11 +259,10 @@ func _show_menu() -> void:
 
 func _show_results() -> void:
 	screen = "results"
-	zombie_active = false
 	health_label.hide()
 	title_label.show()
 	title_label.text = "THE TOWN FELL"
-	results_label.text = "%d zombies killed\n%d zombies got through" % [zombies_killed, zombies_passed]
+	results_label.text = "Reached wave %d\n%d zombies killed" % [wave, zombies_killed]
 	results_label.show()
 	begin_button.hide()
 	retry_button.show()
@@ -253,7 +272,6 @@ func _show_results() -> void:
 func _input(event: InputEvent) -> void:
 	if screen != "playing" or survivor_spawn >= 0:
 		return
-
 	if event is InputEventScreenTouch:
 		if event.pressed:
 			_handle_pointer_down(event.position)
@@ -332,16 +350,15 @@ func _spawn_points() -> Array[Vector2]:
 func _survivor_card_rect() -> Rect2:
 	return Rect2(size.x * 0.5 - 52, size.y - 105, 104, 92)
 
-func _zombie_position() -> Vector2:
+func _zombie_position(zombie: Dictionary) -> Vector2:
 	var road := _road_rect()
-	return Vector2(zombie_x * size.x, road.position.y + road.size.y * 0.5)
+	return Vector2(zombie.x * size.x, road.position.y + road.size.y * 0.5)
 
 func _survivor_range() -> float:
 	return size.x / MAP_WIDTH_METERS * SURVIVOR_RANGE_METERS
 
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), Color("#111812"))
-
 	if screen != "playing":
 		return
 
@@ -364,25 +381,16 @@ func _draw() -> void:
 	if survivor_spawn >= 0:
 		draw_circle(survivor_position, _survivor_range(), Color(0.45, 0.72, 0.48, 0.08))
 		draw_arc(survivor_position, _survivor_range(), 0, TAU, 48, Color(0.45, 0.72, 0.48, 0.25), 2)
-
 		draw_set_transform(survivor_position, survivor_aim_angle)
-		draw_texture_rect(
-			SURVIVOR_TEXTURE,
-			Rect2(Vector2(-38, -32), Vector2(76, 64)),
-			false
-		)
+		draw_texture_rect(SURVIVOR_TEXTURE, Rect2(Vector2(-38, -32), Vector2(76, 64)), false)
 		draw_set_transform(Vector2.ZERO, 0.0)
 
-	if zombie_active:
-		var zombie_position := _zombie_position()
-		draw_texture_rect(
-			ZOMBIE_TEXTURE,
-			Rect2(zombie_position - Vector2(30, 39), Vector2(60, 78)),
-			false
-		)
+	for zombie in zombies:
+		var zombie_position := _zombie_position(zombie)
+		draw_texture_rect(ZOMBIE_TEXTURE, Rect2(zombie_position - Vector2(30, 39), Vector2(60, 78)), false)
 		var bar_position := zombie_position + Vector2(-25, -47)
 		draw_rect(Rect2(bar_position, Vector2(50, 6)), Color("#251f1f"))
-		draw_rect(Rect2(bar_position, Vector2(50.0 * zombie_health / ZOMBIE_MAX_HEALTH, 6)), Color("#d85a55"))
+		draw_rect(Rect2(bar_position, Vector2(50.0 * zombie.hp / ZOMBIE_MAX_HEALTH, 6)), Color("#d85a55"))
 
 	for shot in shots:
 		draw_line(shot.start, shot.end, Color("#ffe184"), 3)
@@ -397,9 +405,4 @@ func _draw() -> void:
 		draw_string(ThemeDB.fallback_font, card.position + Vector2(10, 78), "SURVIVOR • 3m", HORIZONTAL_ALIGNMENT_CENTER, 84, 13, Color.WHITE)
 
 	if dragging_survivor:
-		draw_texture_rect(
-			SURVIVOR_TEXTURE,
-			Rect2(drag_position - Vector2(38, 32), Vector2(76, 64)),
-			false,
-			Color(1, 1, 1, 0.75)
-	)
+		draw_texture_rect(SURVIVOR_TEXTURE, Rect2(drag_position - Vector2(38, 32), Vector2(76, 64)), false, Color(1, 1, 1, 0.75))
