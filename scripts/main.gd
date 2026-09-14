@@ -30,7 +30,8 @@ const SURVIVOR_RANGE_METERS := 5.0
 const SURVIVOR_AWARENESS_MULTIPLIER := 2.0
 const SURVIVOR_TURN_SPEED := 2.4
 const TIME_BETWEEN_WAVES := 1.5
-const TIME_BETWEEN_ZOMBIES := 0.35
+const MIN_TIME_BETWEEN_ZOMBIES := 0.08
+const MAX_TIME_BETWEEN_ZOMBIES := 0.48
 
 var screen := "menu"
 var health := STARTING_HEALTH
@@ -189,20 +190,23 @@ func _update_wave(delta: float) -> void:
 		if spawn_delay <= 0.0:
 			_spawn_zombie()
 			zombies_left_to_spawn -= 1
-			spawn_delay = TIME_BETWEEN_ZOMBIES
+			spawn_delay = randf_range(
+				MIN_TIME_BETWEEN_ZOMBIES,
+				MAX_TIME_BETWEEN_ZOMBIES
+			)
 	elif zombies.is_empty():
 		wave_delay -= delta
 		if wave_delay <= 0.0:
 			wave += 1
-			zombies_left_to_spawn = 1 if wave <= 2 else wave - 1
-			spawn_delay = 0.0
+			zombies_left_to_spawn = int(pow(2.0, wave)) - 1
+			spawn_delay = randf_range(0.0, 0.2)
 			wave_delay = TIME_BETWEEN_WAVES
 
 func _spawn_zombie() -> void:
 	var road := _road_rect()
 	var edge_margin := TILE_SIZE * 0.4
 	zombies.append({
-		"x": -0.1,
+		"x": randf_range(-0.14, -0.08),
 		"y": randf_range(road.position.y + edge_margin, road.end.y - edge_margin),
 		"hp": ZOMBIE_MAX_HEALTH,
 		"alerted": false,
