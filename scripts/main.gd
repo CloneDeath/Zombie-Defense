@@ -15,6 +15,10 @@ const ZOMBIE_ATTACK_RATE := 0.8
 const SURVIVOR_MAX_HEALTH := 10
 const ZOMBIE_MAX_HEALTH := 3
 const FIRE_RATE := 0.65
+const MAGAZINE_SIZE := 10
+const RELOAD_TIME := 1.8
+const EARLY_RELOAD_AT := 5
+const BLOOD_PARTICLE_LIFE := 0.45
 const SURVIVOR_SPEED := 120.0
 const MAP_WIDTH_METERS := 12.0
 const SURVIVOR_RANGE_METERS := 3.0
@@ -41,11 +45,15 @@ var dragging_survivor := false
 var drag_position := Vector2.ZERO
 var pointer_down_position := Vector2.ZERO
 var fire_cooldown := 0.0
+var ammo := MAGAZINE_SIZE
+var reload_time_remaining := 0.0
+var is_reloading := false
 var survivor_position := Vector2.ZERO
 var survivor_target := Vector2.ZERO
 var survivor_is_walking := false
 var survivor_aim_angle := PI
 var shots: Array[Dictionary] = []
+var blood_particles: Array[Dictionary] = []
 var map_offset := Vector2.ZERO
 var map_dragging := false
 var map_drag_position := Vector2.ZERO
@@ -69,7 +77,7 @@ func _ready() -> void:
 	health_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	results_label = _make_label(24, Color.WHITE)
 	results_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	version_label = _make_label(12, Color("#a8b5a5"))
+	version_label = _make_label(16, Color("#c4d0c1"))
 	version_label.text = "%s • %s" % [BuildVersion.BRANCH, BuildVersion.COMMIT]
 	version_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 
@@ -119,8 +127,8 @@ func _layout_ui() -> void:
 	title_label.position = Vector2(10, size.y * (0.22 if portrait else 0.18))
 	title_label.size = Vector2(size.x - 20, 55)
 	title_label.add_theme_font_size_override("font_size", 32 if portrait else 38)
-	version_label.position = Vector2(size.x - 225, 8)
-	version_label.size = Vector2(210, 22)
+	version_label.position = Vector2(size.x - 285, 6)
+	version_label.size = Vector2(270, 28)
 	health_label.position = Vector2(10, 45)
 	health_label.size = Vector2(size.x - 20, 40)
 	health_label.add_theme_font_size_override("font_size", 20 if portrait else 24)
@@ -158,8 +166,16 @@ func _process(delta: float) -> void:
 		if shot.life <= 0.0:
 			shots.erase(shot)
 
+	for particle in blood_particles.duplicate():
+		particle.life -= delta
+		particle.position += particle.velocity * delta
+		particle.velocity *= 0.90
+		if particle.life <= 0.0:
+			blood_particles.erase(particle)
+
 	var survivor_status := "%d" % survivor_health if survivor_spawn >= 0 and survivor_alive else ("DEAD" if survivor_spawn >= 0 else "—")
-	health_label.text = "TOWN: %d    SURVIVOR: %s    WAVE: %d" % [health, survivor_status, wave]
+	var ammo_status := "RELOAD" if is_reloading else "%d/%d" % [ammo, MAGAZINE_SIZE]
+	health_label.text = "TOWN: %d    HP: %s    AMMO: %s    WAVE: %d" % [health, survivor_status, ammo_status, wave]
 	queue_redraw()
 
 func _update_wave(delta: float) -> void:
@@ -231,6 +247,14 @@ func _update_survivor(delta: float) -> void:
 	if survivor_spawn < 0 or not survivor_alive:
 		return
 
+	if is_reloading:
+		reload_time_remaining -= delta
+		if reload_time_remaining <= 0.0:
+			is_reloading = false
+			ammo = MAGAZINE_SIZE
+		else:
+			return
+
 	survivor_target = _spawn_points()[survivor_spawn]
 	var target := _closest_zombie()
 	var distance_to_zombie := INF
@@ -239,6 +263,12 @@ func _update_survivor(delta: float) -> void:
 
 	var zombie_in_range := distance_to_zombie <= _survivor_range()
 	var zombie_in_awareness := distance_to_zombie <= _survivor_range() * SURVIVOR_AWARENESS_MULTIPLIER
+
+	# Reload empty magazines immediately. Top off early only when nearby zombies
+	# are not an immediate threat.
+	if ammo <= 0 or (ammo <= EARLY_RELOAD_AT and not zombie_in_awareness):
+		_start_reload()
+		return
 	if zombie_in_awareness:
 		var desired_angle := survivor_position.angle_to_point(_zombie_position(target))
 		survivor_aim_angle = rotate_toward(survivor_aim_angle, desired_angle, SURVIVOR_TURN_SPEED * delta)
@@ -267,11 +297,25 @@ func _closest_zombie() -> Dictionary:
 			closest_distance = distance
 	return closest
 
+func _start_reload() -> void:
+	if is_reloading or ammo >= MAGAZINE_SIZE:
+		return
+	is_reloading = true
+	reload_time_remaining = RELOAD_TIME
+
 func _shoot(target: Dictionary) -> void:
-	if target.is_empty() or not zombies.has(target):
+	if target.is_empty() or not zombies.has(target) or is_reloading or ammo <= 0:
 		return
 	var target_position := _zombie_position(target)
 	shots.append({"start":survivor_position, "end":target_position, "life":0.12})
+	ammo -= 1
+	for i in 7:
+		var direction := Vector2.RIGHT.rotated(randf_range(0.0, TAU))
+		blood_particles.append({
+			"position": target_position + direction * randf_range(2.0, 8.0),
+			"velocity": direction * randf_range(20.0, 65.0),
+			"life": BLOOD_PARTICLE_LIFE * randf_range(0.65, 1.0)
+		})
 	for zombie in zombies:
 		zombie.alerted = true
 	fire_cooldown = FIRE_RATE
@@ -296,8 +340,12 @@ func _start_game() -> void:
 	survivor_selected = false
 	dragging_survivor = false
 	fire_cooldown = 0.0
+	ammo = MAGAZINE_SIZE
+	reload_time_remaining = 0.0
+	is_reloading = false
 	survivor_aim_angle = PI
 	shots.clear()
+	blood_particles.clear()
 	map_offset = Vector2.ZERO
 	map_dragging = false
 	map_zoom = 1.0
@@ -583,6 +631,8 @@ func _draw() -> void:
 		var survivor_bar := survivor_screen + Vector2(-28, -42)
 		draw_rect(Rect2(survivor_bar, Vector2(56, 6)), Color("#251f1f"))
 		draw_rect(Rect2(survivor_bar, Vector2(56.0 * survivor_health / SURVIVOR_MAX_HEALTH, 6)), Color("#63d471"))
+		var ammo_text := "RELOADING" if is_reloading else "%d/%d" % [ammo, MAGAZINE_SIZE]
+		draw_string(ThemeDB.fallback_font, survivor_bar + Vector2(-5, -7), ammo_text, HORIZONTAL_ALIGNMENT_CENTER, 66, 12, Color.WHITE)
 
 	for zombie in zombies:
 		var zombie_position := _map_to_screen(_zombie_position(zombie))
@@ -596,6 +646,10 @@ func _draw() -> void:
 	for shot in shots:
 		draw_line(_map_to_screen(shot.start), _map_to_screen(shot.end), Color("#ffe184"), 3)
 		draw_circle(_map_to_screen(shot.end), 4, Color("#fff4b0"))
+
+	for particle in blood_particles:
+		var alpha := clampf(particle.life / BLOOD_PARTICLE_LIFE, 0.0, 1.0)
+		draw_circle(_map_to_screen(particle.position), maxf(1.5, 3.5 * map_zoom), Color(0.55, 0.02, 0.02, alpha))
 
 	if survivor_spawn < 0:
 		var card := _survivor_card_rect()
