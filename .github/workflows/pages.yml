@@ -52,8 +52,16 @@ jobs:
           test -f assets/kenney/grass.png
           test -f assets/kenney/road.png
           test -f assets/kenney/sidewalk.png
-      - name: Smoke test game scene
-        run: godot --headless --path . --quit-after 3
+      - name: Import Godot project
+        run: godot --headless --editor --path . --quit
+      - name: Smoke test active gameplay
+        shell: bash
+        run: |
+          set -o pipefail
+          godot --headless --path . --quit-after 3 2>&1 | tee /tmp/godot-smoke.log
+          if grep -E "SCRIPT ERROR|Failed to load script" /tmp/godot-smoke.log; then
+            exit 1
+          fi
       - name: Export web build
         run: |
           mkdir -p build/web
