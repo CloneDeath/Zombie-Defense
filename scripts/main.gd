@@ -23,9 +23,10 @@ const RELOAD_TIME := 1.8
 const EARLY_RELOAD_AT := 5
 const BLOOD_PARTICLE_LIFE := 0.45
 const SURVIVOR_SPEED := 120.0
+const SURVIVOR_COMBAT_SPEED := 40.0
 const STREET_WIDTH_TILES := 6
 const SIDEWALK_WIDTH_TILES := 1
-const SURVIVOR_RANGE_METERS := 3.0
+const SURVIVOR_RANGE_METERS := 5.0
 const SURVIVOR_AWARENESS_MULTIPLIER := 2.0
 const SURVIVOR_TURN_SPEED := 2.4
 const TIME_BETWEEN_WAVES := 1.5
@@ -280,12 +281,18 @@ func _update_survivor(delta: float) -> void:
 		var walk_angle := survivor_position.angle_to_point(survivor_target)
 		survivor_aim_angle = rotate_toward(survivor_aim_angle, walk_angle, SURVIVOR_TURN_SPEED * delta)
 
+	var distance_to_destination := survivor_position.distance_to(survivor_target)
 	if zombie_in_range:
-		survivor_is_walking = false
 		fire_cooldown -= delta
 		if fire_cooldown <= 0.0:
 			_shoot(target)
-	elif survivor_position.distance_to(survivor_target) > 1.0:
+		survivor_is_walking = distance_to_destination > 1.0
+		if survivor_is_walking:
+			survivor_position = survivor_position.move_toward(
+				survivor_target,
+				SURVIVOR_COMBAT_SPEED * delta
+			)
+	elif distance_to_destination > 1.0:
 		survivor_is_walking = true
 		survivor_position = survivor_position.move_toward(survivor_target, SURVIVOR_SPEED * delta)
 	else:
@@ -651,6 +658,20 @@ func _draw() -> void:
 
 	if survivor_spawn >= 0:
 		var survivor_screen := _map_to_screen(survivor_position)
+		if survivor_alive and survivor_is_walking:
+			var destination_screen := _map_to_screen(survivor_target)
+			var arrow_direction := survivor_screen.direction_to(destination_screen)
+			var arrow_tip := destination_screen
+			var arrow_base := arrow_tip - arrow_direction * 18.0
+			var arrow_side := arrow_direction.orthogonal() * 9.0
+			var arrow_color := Color(0.20, 0.65, 1.0, 0.58)
+			draw_line(survivor_screen, arrow_base, arrow_color, 4.0)
+			draw_colored_polygon(
+				PackedVector2Array([arrow_tip, arrow_base + arrow_side, arrow_base - arrow_side]),
+				arrow_color
+			)
+			draw_circle(destination_screen, 11.0, Color(0.20, 0.65, 1.0, 0.22))
+			draw_arc(destination_screen, 11.0, 0.0, TAU, 24, arrow_color, 2.0)
 		if survivor_alive:
 			draw_circle(survivor_screen, _survivor_range() * map_zoom, Color(0.45, 0.72, 0.48, 0.08))
 			draw_arc(survivor_screen, _survivor_range() * map_zoom, 0, TAU, 48, Color(0.45, 0.72, 0.48, 0.25), 2)
@@ -687,7 +708,7 @@ func _draw() -> void:
 		draw_rect(card, card_color)
 		draw_rect(card, Color("#9fba9e"), false, 2)
 		draw_texture_rect(SURVIVOR_TEXTURE, Rect2(card.position + Vector2(23, 5), Vector2(58, 49)), false)
-		draw_string(ThemeDB.fallback_font, card.position + Vector2(10, 78), "SURVIVOR • 3m", HORIZONTAL_ALIGNMENT_CENTER, 84, 13, Color.WHITE)
+		draw_string(ThemeDB.fallback_font, card.position + Vector2(10, 78), "SURVIVOR • 5m", HORIZONTAL_ALIGNMENT_CENTER, 84, 13, Color.WHITE)
 
 	if dragging_survivor:
 		draw_texture_rect(SURVIVOR_TEXTURE, Rect2(drag_position - Vector2(38, 32), Vector2(76, 64)), false, Color(1, 1, 1, 0.75))
