@@ -742,11 +742,11 @@ func _draw() -> void:
 	for zombie in zombies:
 		var zombie_position := _map_to_screen(_zombie_position(zombie))
 		draw_set_transform(zombie_position, zombie.aim_angle, Vector2(map_zoom, map_zoom))
-		draw_texture_rect(ZOMBIE_TEXTURE, Rect2(Vector2(-30, -39), Vector2(60, 78)), false)
+		draw_texture_rect(ZOMBIE_TEXTURE, Rect2(Vector2(-26, -32), Vector2(52, 64)), false)
 		draw_set_transform(Vector2.ZERO, 0.0)
-		var bar_position := zombie_position + Vector2(-25, -47)
-		draw_rect(Rect2(bar_position, Vector2(50, 6)), Color("#251f1f"))
-		draw_rect(Rect2(bar_position, Vector2(50.0 * zombie.hp / ZOMBIE_MAX_HEALTH, 6)), Color("#d85a55"))
+		var bar_position := zombie_position + Vector2(-22, -39)
+		draw_rect(Rect2(bar_position, Vector2(44, 6)), Color("#251f1f"))
+		draw_rect(Rect2(bar_position, Vector2(44.0 * zombie.hp / ZOMBIE_MAX_HEALTH, 6)), Color("#d85a55"))
 
 	for shot in shots:
 		draw_line(_map_to_screen(shot.start), _map_to_screen(shot.end), Color("#ffe184"), 3)
