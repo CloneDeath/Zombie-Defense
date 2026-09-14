@@ -95,26 +95,34 @@ func _notification(what: int) -> void:
 
 func _layout_ui() -> void:
 	var center_x := size.x * 0.5
-	title_label.position = Vector2(10, size.y * 0.18)
+	var portrait := size.y > size.x
+	title_label.position = Vector2(10, size.y * (0.22 if portrait else 0.18))
 	title_label.size = Vector2(size.x - 20, 55)
+	title_label.add_theme_font_size_override("font_size", 32 if portrait else 38)
 
 	version_label.position = Vector2(size.x - 225, 8)
 	version_label.size = Vector2(210, 22)
 
 	health_label.position = Vector2(10, 45)
 	health_label.size = Vector2(size.x - 20, 40)
+	health_label.add_theme_font_size_override("font_size", 20 if portrait else 24)
 
-	results_label.position = Vector2(10, size.y * 0.38)
-	results_label.size = Vector2(size.x - 20, 70)
+	results_label.position = Vector2(10, size.y * (0.38 if portrait else 0.36))
+	results_label.size = Vector2(size.x - 20, 76)
 
 	begin_button.position = Vector2(center_x - 100, size.y * 0.52)
 	begin_button.size = Vector2(200, 58)
 
-	retry_button.position = Vector2(center_x - 155, size.y * 0.58)
-	retry_button.size = Vector2(145, 58)
-
-	menu_button.position = Vector2(center_x + 10, size.y * 0.58)
-	menu_button.size = Vector2(145, 58)
+	if portrait:
+		retry_button.position = Vector2(center_x - 100, size.y * 0.56)
+		retry_button.size = Vector2(200, 58)
+		menu_button.position = Vector2(center_x - 100, size.y * 0.56 + 70)
+		menu_button.size = Vector2(200, 58)
+	else:
+		retry_button.position = Vector2(center_x - 155, size.y * 0.58)
+		retry_button.size = Vector2(145, 58)
+		menu_button.position = Vector2(center_x + 10, size.y * 0.58)
+		menu_button.size = Vector2(145, 58)
 
 func _process(delta: float) -> void:
 	if screen != "playing":
