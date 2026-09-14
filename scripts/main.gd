@@ -180,9 +180,7 @@ func _process(delta: float) -> void:
 		if particle.life <= 0.0:
 			blood_particles.erase(particle)
 
-	var survivor_status := "%d" % survivor_health if survivor_spawn >= 0 and survivor_alive else ("DEAD" if survivor_spawn >= 0 else "—")
-	var ammo_status := "RELOAD" if is_reloading else "%d/%d" % [ammo, MAGAZINE_SIZE]
-	health_label.text = "TOWN: %d    HP: %s    AMMO: %s    WAVE: %d" % [health, survivor_status, ammo_status, wave]
+	health_label.text = "TOWN: %d    WAVE: %d" % [health, wave]
 	queue_redraw()
 
 func _update_wave(delta: float) -> void:
@@ -711,8 +709,6 @@ func _draw() -> void:
 		var survivor_bar := survivor_screen + Vector2(-28, -42)
 		draw_rect(Rect2(survivor_bar, Vector2(56, 6)), Color("#251f1f"))
 		draw_rect(Rect2(survivor_bar, Vector2(56.0 * survivor_health / SURVIVOR_MAX_HEALTH, 6)), Color("#63d471"))
-		var ammo_text := "RELOADING" if is_reloading else "%d/%d" % [ammo, MAGAZINE_SIZE]
-		draw_string(ThemeDB.fallback_font, survivor_bar + Vector2(-5, -7), ammo_text, HORIZONTAL_ALIGNMENT_CENTER, 66, 12, Color.WHITE)
 
 	for zombie in zombies:
 		var zombie_position := _map_to_screen(_zombie_position(zombie))
@@ -741,3 +737,32 @@ func _draw() -> void:
 
 	if dragging_survivor:
 		draw_texture_rect(SURVIVOR_TEXTURE, Rect2(drag_position - Vector2(38, 32), Vector2(76, 64)), false, Color(1, 1, 1, 0.75))
+
+	if survivor_selected and survivor_spawn >= 0:
+		_draw_survivor_info_panel()
+
+func _draw_survivor_info_panel() -> void:
+	var panel_size := Vector2(260, 142)
+	var panel_position := Vector2(14, size.y - panel_size.y - 14)
+	var panel := Rect2(panel_position, panel_size)
+	draw_rect(panel, Color(0.035, 0.055, 0.08, 0.92))
+	draw_rect(panel, Color(0.25, 0.62, 0.92, 0.9), false, 2.0)
+
+	var portrait := Rect2(panel_position + Vector2(12, 36), Vector2(76, 76))
+	draw_rect(portrait, Color(0.10, 0.20, 0.30, 1.0))
+	draw_texture_rect(SURVIVOR_TEXTURE, portrait, false)
+
+	draw_string(
+		ThemeDB.fallback_font,
+		panel_position + Vector2(12, 25),
+		"OFFICER REED",
+		HORIZONTAL_ALIGNMENT_LEFT,
+		220,
+		20,
+		Color.WHITE
+	)
+	var status := "RELOADING" if is_reloading else "%d / %d" % [ammo, MAGAZINE_SIZE]
+	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 58), "POLICE OFFICER", HORIZONTAL_ALIGNMENT_LEFT, 145, 14, Color("#83c7ff"))
+	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 82), "HEALTH  %d / %d" % [survivor_health, SURVIVOR_MAX_HEALTH], HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 104), "AMMO    %s" % status, HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 126), "KILLS   %d" % zombies_killed, HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
