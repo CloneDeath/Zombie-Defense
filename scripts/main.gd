@@ -43,6 +43,7 @@ var survivor_aim_angle := PI
 var shots: Array[Dictionary] = []
 var map_offset := Vector2.ZERO
 var map_dragging := false
+var map_drag_position := Vector2.ZERO
 
 var title_label: Label
 var health_label: Label
@@ -324,6 +325,7 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventScreenTouch:
 		if event.pressed:
 			map_dragging = not _handle_pointer_down(event.position)
+			map_drag_position = event.position
 		else:
 			if dragging_survivor:
 				_handle_pointer_up(event.position)
@@ -332,11 +334,13 @@ func _input(event: InputEvent) -> void:
 		if dragging_survivor:
 			drag_position = event.position
 		elif map_dragging:
-			map_offset += event.relative
+			map_offset += event.position - map_drag_position
+			map_drag_position = event.position
 		queue_redraw()
 	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
 			map_dragging = not _handle_pointer_down(event.position)
+			map_drag_position = event.position
 		else:
 			if dragging_survivor:
 				_handle_pointer_up(event.position)
@@ -345,7 +349,8 @@ func _input(event: InputEvent) -> void:
 		if dragging_survivor:
 			drag_position = event.position
 		elif map_dragging:
-			map_offset += event.relative
+			map_offset += event.position - map_drag_position
+			map_drag_position = event.position
 		queue_redraw()
 
 func _handle_pointer_down(position: Vector2) -> bool:
