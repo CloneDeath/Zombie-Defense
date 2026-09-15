@@ -41,6 +41,7 @@ const MAGAZINE_SIZE := 10
 const RELOAD_TIME := 1.8
 const EARLY_RELOAD_AT := 5
 const BLOOD_PARTICLE_LIFE := 0.45
+const LEVEL_UP_EFFECT_LIFE := 1.25
 const SURVIVOR_SPEED := 120.0
 const SURVIVOR_COMBAT_SPEED := 40.0
 const STREET_WIDTH_TILES := 6
@@ -100,6 +101,7 @@ var survivor_is_walking := false
 var survivor_aim_angle := PI
 var shots: Array[Dictionary] = []
 var blood_particles: Array[Dictionary] = []
+var level_up_effects: Array[Dictionary] = []
 var map_offset := Vector2.ZERO
 var map_dragging := false
 var map_drag_position := Vector2.ZERO
@@ -226,6 +228,11 @@ func _process(delta: float) -> void:
 		particle.velocity *= 0.90
 		if particle.life <= 0.0:
 			blood_particles.erase(particle)
+
+	for effect in level_up_effects.duplicate():
+		effect.life -= delta
+		if effect.life <= 0.0:
+			level_up_effects.erase(effect)
 
 	health_label.text = "TOWN: %d    WAVE: %d" % [health, wave]
 	queue_redraw()
@@ -582,6 +589,7 @@ func _award_cop_xp() -> void:
 		cop_xp_to_next = cop_level * 3
 		survivor_max_health += 2
 		survivor_health = survivor_max_health
+		level_up_effects.append({"unit":"cop", "life":LEVEL_UP_EFFECT_LIFE})
 
 func _award_baseball_xp() -> void:
 	baseball_xp += 1
@@ -591,6 +599,7 @@ func _award_baseball_xp() -> void:
 		baseball_xp_to_next = baseball_level * 3
 		baseball_max_health += 2
 		baseball_health = baseball_max_health
+		level_up_effects.append({"unit":"baseball", "life":LEVEL_UP_EFFECT_LIFE})
 
 func _start_game() -> void:
 	screen = "playing"
@@ -635,6 +644,7 @@ func _start_game() -> void:
 	survivor_aim_angle = PI
 	shots.clear()
 	blood_particles.clear()
+	level_up_effects.clear()
 	map_zoom = 1.0
 	map_offset = _centered_map_offset()
 	map_dragging = false
@@ -1032,6 +1042,23 @@ func _draw() -> void:
 	for particle in blood_particles:
 		var alpha := clampf(particle.life / BLOOD_PARTICLE_LIFE, 0.0, 1.0)
 		draw_circle(_map_to_screen(particle.position), maxf(1.5, 3.5 * map_zoom), Color(0.55, 0.02, 0.02, alpha))
+
+	for effect in level_up_effects:
+		var unit_position: Vector2 = survivor_position if effect.unit == "cop" else baseball_position
+		var progress := 1.0 - effect.life / LEVEL_UP_EFFECT_LIFE
+		var popup_position := _map_to_screen(unit_position) + Vector2(-55, -52 - progress * 28.0)
+		var alpha := clampf(effect.life / (LEVEL_UP_EFFECT_LIFE * 0.55), 0.0, 1.0)
+		var popup_color := Color(1.0, 0.82, 0.22, alpha)
+		draw_string(
+			ThemeDB.fallback_font,
+			popup_position,
+			"LEVEL UP!",
+			HORIZONTAL_ALIGNMENT_CENTER,
+			110,
+			20,
+			popup_color
+		)
+		draw_arc(_map_to_screen(unit_position), (28.0 + progress * 18.0) * map_zoom, 0.0, TAU, 32, Color(1.0, 0.78, 0.18, alpha * 0.6), 3.0)
 
 	if survivor_spawn < 0:
 		var card := _survivor_card_rect()
