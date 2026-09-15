@@ -1045,7 +1045,7 @@ func _draw() -> void:
 
 	for effect in level_up_effects:
 		var unit_position: Vector2 = survivor_position if effect.unit == "cop" else baseball_position
-		var progress := 1.0 - effect.life / LEVEL_UP_EFFECT_LIFE
+		var progress: float = 1.0 - float(effect.life) / LEVEL_UP_EFFECT_LIFE
 		var popup_position := _map_to_screen(unit_position) + Vector2(-55, -52 - progress * 28.0)
 		var alpha := clampf(effect.life / (LEVEL_UP_EFFECT_LIFE * 0.55), 0.0, 1.0)
 		var popup_color := Color(1.0, 0.82, 0.22, alpha)
