@@ -49,7 +49,7 @@ const SIDEWALK_WIDTH_TILES := 1
 const SURVIVOR_RANGE_METERS := 5.0
 const SURVIVOR_AWARENESS_MULTIPLIER := 2.0
 const SURVIVOR_TURN_SPEED := 2.4
-const TIME_BETWEEN_WAVES := 1.5
+const TIME_BETWEEN_WAVES := 8.0
 const MIN_TIME_BETWEEN_ZOMBIES := 0.08
 const MAX_TIME_BETWEEN_ZOMBIES := 0.48
 
@@ -238,6 +238,14 @@ func _process(delta: float) -> void:
 	queue_redraw()
 
 func _update_wave(delta: float) -> void:
+	wave_delay -= delta
+	if wave_delay <= 0.0:
+		wave += 1
+		zombies_left_to_spawn += int(pow(2.0, wave)) - 1
+		wave_delay += TIME_BETWEEN_WAVES
+		if spawn_delay <= 0.0:
+			spawn_delay = randf_range(0.0, 0.2)
+
 	if zombies_left_to_spawn > 0:
 		spawn_delay -= delta
 		if spawn_delay <= 0.0:
@@ -247,13 +255,6 @@ func _update_wave(delta: float) -> void:
 				MIN_TIME_BETWEEN_ZOMBIES,
 				MAX_TIME_BETWEEN_ZOMBIES
 			)
-	elif zombies.is_empty():
-		wave_delay -= delta
-		if wave_delay <= 0.0:
-			wave += 1
-			zombies_left_to_spawn = int(pow(2.0, wave)) - 1
-			spawn_delay = randf_range(0.0, 0.2)
-			wave_delay = TIME_BETWEEN_WAVES
 
 func _spawn_zombie() -> void:
 	var road := _road_rect()
