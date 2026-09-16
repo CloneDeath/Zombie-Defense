@@ -9,7 +9,7 @@ const SIDEWALK_TEXTURE := preload("res://assets/kenney/sidewalk.png")
 const STARTING_HEALTH := 10
 const TILE_SIZE := 64.0
 const MAP_SIZE_TILES := 20
-const MAP_OVERSCAN := TILE_SIZE * 12.0
+const MAP_OVERSCAN := TILE_SIZE * 24.0
 const CAMERA_NODE_EDGE_RATIO := 0.18
 const CAMERA_SPRING_SPEED := 11.0
 const OVERSCROLL_RESISTANCE := 0.32
@@ -805,15 +805,20 @@ func _map_offset_bounds() -> Dictionary:
 	var points := _spawn_points()
 	var leftmost_node_x := points[0].x
 	var rightmost_node_x := points[0].x
+	var topmost_node_y := points[0].y
+	var bottommost_node_y := points[0].y
 	for point in points:
 		leftmost_node_x = minf(leftmost_node_x, point.x)
 		rightmost_node_x = maxf(rightmost_node_x, point.x)
+		topmost_node_y = minf(topmost_node_y, point.y)
+		bottommost_node_y = maxf(bottommost_node_y, point.y)
 	# Let the outer placement nodes travel across most of the viewport before
 	# reaching the soft edge, rather than stopping at the map boundary.
 	var min_x := size.x * CAMERA_NODE_EDGE_RATIO - rightmost_node_x * map_zoom
 	var max_x := size.x * (1.0 - CAMERA_NODE_EDGE_RATIO) - leftmost_node_x * map_zoom
-	var min_y := bottom - map_size.y
-	var max_y := top
+	var playable_height := bottom - top
+	var min_y := top + playable_height * CAMERA_NODE_EDGE_RATIO - bottommost_node_y * map_zoom
+	var max_y := top + playable_height * (1.0 - CAMERA_NODE_EDGE_RATIO) - topmost_node_y * map_zoom
 	if min_x > max_x:
 		min_x = (size.x - map_size.x) * 0.5
 		max_x = min_x
@@ -1024,9 +1029,20 @@ func _draw() -> void:
 	# Draw in map space so Kenney's 64 px tiles zoom and pan with the world.
 	draw_set_transform(map_offset, 0.0, Vector2(map_zoom, map_zoom))
 	draw_texture_rect(GRASS_TEXTURE, terrain_extent, true)
-	# Use the asphalt center of the road-edge tile, avoiding repeated lane lines.
-	draw_texture_rect_region(ROAD_TEXTURE, road, Rect2(8, 0, 48, 64))
-	draw_texture_rect_region(ROAD_TEXTURE, vertical_road, Rect2(8, 0, 48, 64))
+	# Draw three non-overlapping pieces so the two stretched textures do not
+	# create a visible seam through the middle of the turn.
+	var approach_road := Rect2(
+		road.position,
+		Vector2(vertical_road.position.x - road.position.x, road.size.y)
+	)
+	var corner_road := Rect2(vertical_road.position, Vector2(vertical_road.size.x, road.size.y))
+	var exit_road := Rect2(
+		Vector2(vertical_road.position.x, road.end.y),
+		Vector2(vertical_road.size.x, vertical_road.end.y - road.end.y)
+	)
+	draw_texture_rect_region(ROAD_TEXTURE, approach_road, Rect2(8, 0, 48, 64))
+	draw_texture_rect_region(ROAD_TEXTURE, corner_road, Rect2(8, 0, 48, 64))
+	draw_texture_rect_region(ROAD_TEXTURE, exit_road, Rect2(8, 0, 48, 64))
 	for sidewalk in _sidewalk_rects():
 		draw_texture_rect(SIDEWALK_TEXTURE, sidewalk, true)
 	draw_set_transform(Vector2.ZERO, 0.0)
