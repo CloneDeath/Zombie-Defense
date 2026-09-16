@@ -484,13 +484,14 @@ func _update_survivor(delta: float) -> void:
 			_shoot(target)
 		survivor_is_walking = distance_to_destination > 1.0
 		if survivor_is_walking:
-			survivor_position = survivor_position.move_toward(
+			survivor_position = _move_around_car(
+				survivor_position,
 				survivor_target,
 				SURVIVOR_COMBAT_SPEED * delta
 			)
 	elif distance_to_destination > 1.0:
 		survivor_is_walking = true
-		survivor_position = survivor_position.move_toward(survivor_target, SURVIVOR_SPEED * delta)
+		survivor_position = _move_around_car(survivor_position, survivor_target, SURVIVOR_SPEED * delta)
 	else:
 		survivor_is_walking = false
 
@@ -515,7 +516,7 @@ func _update_baseball_survivor(delta: float) -> void:
 				var next_position := baseball_position + retreat_direction * BASEBALL_RECHARGE_SPEED * delta
 				var max_roam := BASEBALL_ROAM_METERS * TILE_SIZE
 				if next_position.distance_to(baseball_target) <= max_roam:
-					baseball_position = next_position
+					baseball_position = _move_around_car(baseball_position, next_position, BASEBALL_RECHARGE_SPEED * delta)
 			else:
 				baseball_is_walking = false
 		elif distance <= BASEBALL_MELEE_METERS * TILE_SIZE:
@@ -523,16 +524,46 @@ func _update_baseball_survivor(delta: float) -> void:
 			_swing_bat(target)
 		else:
 			baseball_is_walking = true
-			baseball_position = baseball_position.move_toward(target_position, BASEBALL_SPEED * delta)
+			baseball_position = _move_around_car(baseball_position, target_position, BASEBALL_SPEED * delta)
 	else:
 		var distance_home := baseball_position.distance_to(baseball_target)
 		if distance_home > 1.0:
 			baseball_is_walking = true
 			var home_angle := baseball_position.angle_to_point(baseball_target)
 			baseball_aim_angle = rotate_toward(baseball_aim_angle, home_angle, SURVIVOR_TURN_SPEED * delta)
-			baseball_position = baseball_position.move_toward(baseball_target, BASEBALL_SPEED * delta)
+			baseball_position = _move_around_car(baseball_position, baseball_target, BASEBALL_SPEED * delta)
 		else:
 			baseball_is_walking = false
+
+func _car_rect() -> Rect2:
+	return Rect2(Vector2(755, 1010), Vector2(96, 177))
+
+func _move_around_car(current: Vector2, target: Vector2, distance: float) -> Vector2:
+	var obstacle := _car_rect().grow(30.0)
+	if not obstacle.intersects_segment(current, target):
+		return current.move_toward(target, distance)
+
+	# Pick the shortest reachable corner. Re-evaluating each frame naturally
+	# carries the survivor around the near corner and then the far corner.
+	var clearance := 8.0
+	var waypoints: Array[Vector2] = [
+		obstacle.position - Vector2(clearance, clearance),
+		Vector2(obstacle.end.x + clearance, obstacle.position.y - clearance),
+		Vector2(obstacle.position.x - clearance, obstacle.end.y + clearance),
+		obstacle.end + Vector2(clearance, clearance)
+	]
+	var best_waypoint := current
+	var best_distance := INF
+	for waypoint in waypoints:
+		if obstacle.intersects_segment(current, waypoint):
+			continue
+		var route_distance := current.distance_to(waypoint) + waypoint.distance_to(target)
+		if route_distance < best_distance:
+			best_distance = route_distance
+			best_waypoint = waypoint
+	if best_waypoint == current:
+		return current
+	return current.move_toward(best_waypoint, distance)
 
 func _closest_zombie_in_baseball_roam() -> Dictionary:
 	var closest: Dictionary = {}
@@ -1277,7 +1308,7 @@ func _draw_decor() -> void:
 	draw_texture_rect(OIL_SPILL_TEXTURE, Rect2(Vector2(952, 770), Vector2(54, 54)), false)
 
 	# Larger roadside clutter.
-	draw_texture_rect(CAR_TEXTURE, Rect2(Vector2(755, 1010), Vector2(96, 177)), false)
+	draw_texture_rect(CAR_TEXTURE, _car_rect(), false)
 	draw_texture_rect(DEBRIS_TEXTURE, Rect2(Vector2(610, 735), Vector2(64, 64)), false)
 	draw_texture_rect(DEBRIS_TEXTURE, Rect2(Vector2(1125, 420), Vector2(56, 56)), false)
 
