@@ -574,9 +574,23 @@ func _update_baseball_survivor(delta: float) -> void:
 func _car_rect() -> Rect2:
 	return Rect2(Vector2(755, 1010), Vector2(96, 177))
 
+func _segment_intersects_rect(from: Vector2, to: Vector2, rect: Rect2) -> bool:
+	if rect.has_point(from) or rect.has_point(to):
+		return true
+	var top_left := rect.position
+	var top_right := Vector2(rect.end.x, rect.position.y)
+	var bottom_right := rect.end
+	var bottom_left := Vector2(rect.position.x, rect.end.y)
+	return (
+		Geometry2D.segment_intersects_segment(from, to, top_left, top_right) != null
+		or Geometry2D.segment_intersects_segment(from, to, top_right, bottom_right) != null
+		or Geometry2D.segment_intersects_segment(from, to, bottom_right, bottom_left) != null
+		or Geometry2D.segment_intersects_segment(from, to, bottom_left, top_left) != null
+	)
+
 func _move_around_car(current: Vector2, target: Vector2, distance: float) -> Vector2:
 	var obstacle := _car_rect().grow(30.0)
-	if not obstacle.intersects_segment(current, target):
+	if not _segment_intersects_rect(current, target, obstacle):
 		return current.move_toward(target, distance)
 
 	# Pick the shortest reachable corner. Re-evaluating each frame naturally
@@ -591,7 +605,7 @@ func _move_around_car(current: Vector2, target: Vector2, distance: float) -> Vec
 	var best_waypoint := current
 	var best_distance := INF
 	for waypoint in waypoints:
-		if obstacle.intersects_segment(current, waypoint):
+		if _segment_intersects_rect(current, waypoint, obstacle):
 			continue
 		var route_distance := current.distance_to(waypoint) + waypoint.distance_to(target)
 		if route_distance < best_distance:
