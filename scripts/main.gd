@@ -9,7 +9,8 @@ const SIDEWALK_TEXTURE := preload("res://assets/kenney/sidewalk.png")
 const STARTING_HEALTH := 10
 const TILE_SIZE := 64.0
 const MAP_SIZE_TILES := 20
-const MAP_OVERSCAN := TILE_SIZE * 3.0
+const MAP_OVERSCAN := TILE_SIZE * 12.0
+const CAMERA_NODE_EDGE_RATIO := 0.18
 const CAMERA_SPRING_SPEED := 11.0
 const OVERSCROLL_RESISTANCE := 0.32
 const ZOMBIE_SPEED := 0.069
@@ -766,6 +767,15 @@ func _pan_map(delta: Vector2) -> void:
 	if (map_offset.y > bounds.max_y and delta.y > 0.0) or (map_offset.y < bounds.min_y and delta.y < 0.0):
 		adjusted.y *= OVERSCROLL_RESISTANCE
 	map_offset += adjusted
+	# The overscan is the hard edge: resistance begins at the soft bounds,
+	# but dragging can continue until the extended terrain reaches the viewport.
+	var hard_min := Vector2(
+		size.x - (_map_size().x + MAP_OVERSCAN) * map_zoom,
+		size.y - (_map_size().y + MAP_OVERSCAN) * map_zoom
+	)
+	var hard_max := Vector2(MAP_OVERSCAN * map_zoom, MAP_OVERSCAN * map_zoom)
+	map_offset.x = clampf(map_offset.x, hard_min.x, hard_max.x)
+	map_offset.y = clampf(map_offset.y, hard_min.y, hard_max.y)
 
 func _minimum_zoom() -> float:
 	var playable_height := maxf(1.0, size.y - 190.0)
@@ -776,8 +786,16 @@ func _map_offset_bounds() -> Dictionary:
 	var map_size := _map_size() * map_zoom
 	var top := 78.0
 	var bottom := size.y - 112.0
-	var min_x := size.x - map_size.x
-	var max_x := 0.0
+	var points := _spawn_points()
+	var leftmost_node_x := points[0].x
+	var rightmost_node_x := points[0].x
+	for point in points:
+		leftmost_node_x = minf(leftmost_node_x, point.x)
+		rightmost_node_x = maxf(rightmost_node_x, point.x)
+	# Let the outer placement nodes travel across most of the viewport before
+	# reaching the soft edge, rather than stopping at the map boundary.
+	var min_x := size.x * CAMERA_NODE_EDGE_RATIO - rightmost_node_x * map_zoom
+	var max_x := size.x * (1.0 - CAMERA_NODE_EDGE_RATIO) - leftmost_node_x * map_zoom
 	var min_y := bottom - map_size.y
 	var max_y := top
 	if min_x > max_x:
