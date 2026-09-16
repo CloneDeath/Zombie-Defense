@@ -262,7 +262,7 @@ func _spawn_zombie() -> void:
 	var edge_margin := TILE_SIZE * 0.4
 	var spawn_y := randf_range(road.position.y + edge_margin, road.end.y - edge_margin)
 	zombies.append({
-		"x": randf_range(-0.14, -0.08),
+		"x": (-MAP_OVERSCAN - TILE_SIZE) / _map_size().x,
 		"y": spawn_y,
 		"path_offset": spawn_y - _road_center().y,
 		"turned": false,
