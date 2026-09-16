@@ -11,6 +11,14 @@ const CAR_TEXTURE := preload("res://assets/kenney/car.png")
 const MANHOLE_TEXTURE := preload("res://assets/kenney/manhole.png")
 const DEBRIS_TEXTURE := preload("res://assets/kenney/debris.png")
 const OIL_SPILL_TEXTURE := preload("res://assets/kenney/oil_spill.png")
+const HOUSE_TILE_FLOOR_TEXTURE := preload("res://assets/kenney/house_tile_floor.png")
+const HOUSE_WOOD_FLOOR_TEXTURE := preload("res://assets/kenney/house_wood_floor.png")
+const HOUSE_CRATE_TEXTURE := preload("res://assets/kenney/house_crate.png")
+const HOUSE_PLANT_TEXTURE := preload("res://assets/kenney/house_plant.png")
+const HOUSE_SOFA_TEXTURE := preload("res://assets/kenney/house_sofa.png")
+const HOUSE_TABLE_TEXTURE := preload("res://assets/kenney/house_table.png")
+const HOUSE_FRIDGE_TEXTURE := preload("res://assets/kenney/house_fridge.png")
+const HOUSE_STOVE_TEXTURE := preload("res://assets/kenney/house_stove.png")
 const STARTING_HEALTH := 10
 const TILE_SIZE := 64.0
 const MAP_SIZE_TILES := 20
@@ -1175,11 +1183,13 @@ func _sidewalk_rects() -> Array[Rect2]:
 		Rect2(left_road.position.x, upper_bottom, vertical.position.x - left_road.position.x, sidewalk),
 		Rect2(vertical.end.x, lower_top - sidewalk, right_road.end.x - vertical.end.x, sidewalk),
 		Rect2(vertical.end.x, lower_bottom, right_road.end.x - vertical.end.x, sidewalk),
+		# The west curb only opens for the upper road. It remains continuous
+		# through the lower east-facing intersection.
 		Rect2(vertical.position.x - sidewalk, vertical.position.y, sidewalk, upper_top - vertical.position.y),
-		Rect2(vertical.end.x, vertical.position.y, sidewalk, upper_top - vertical.position.y),
-		Rect2(vertical.position.x - sidewalk, upper_bottom, sidewalk, lower_top - upper_bottom),
-		Rect2(vertical.end.x, upper_bottom, sidewalk, lower_top - upper_bottom),
-		Rect2(vertical.position.x - sidewalk, lower_bottom, sidewalk, vertical.end.y - lower_bottom),
+		Rect2(vertical.position.x - sidewalk, upper_bottom, sidewalk, vertical.end.y - upper_bottom),
+		# The east curb stays continuous through the upper west-facing
+		# intersection, and only opens where the lower road branches east.
+		Rect2(vertical.end.x, vertical.position.y, sidewalk, lower_top - vertical.position.y),
 		Rect2(vertical.end.x, lower_bottom, sidewalk, vertical.end.y - lower_bottom)
 	]
 
@@ -1356,14 +1366,7 @@ func _draw() -> void:
 		_draw_baseball_info_panel()
 
 func _draw_decor() -> void:
-	# A simple rural house lot in the northeast corner.
-	var house := Rect2(Vector2(930, 35), Vector2(245, 145))
-	draw_rect(Rect2(Vector2(955, 180), Vector2(72, 76)), Color("#b8c4c2"))
-	draw_rect(house, Color("#9b583c"))
-	draw_rect(house.grow(-14.0), Color("#d7b27b"))
-	draw_rect(Rect2(Vector2(1030, 132), Vector2(42, 48)), Color("#69452f"))
-	draw_rect(Rect2(Vector2(960, 72), Vector2(48, 38)), Color("#8fc4d1"))
-	draw_rect(Rect2(Vector2(1100, 72), Vector2(48, 38)), Color("#8fc4d1"))
+	_draw_house_interior()
 
 	var tree_positions: Array[Vector2] = [
 		Vector2(120, 80),
@@ -1387,6 +1390,36 @@ func _draw_decor() -> void:
 	draw_texture_rect(CAR_TEXTURE, _car_rect(), false)
 	draw_texture_rect(DEBRIS_TEXTURE, Rect2(Vector2(410, 610), Vector2(64, 64)), false)
 	draw_texture_rect(DEBRIS_TEXTURE, Rect2(Vector2(1085, 650), Vector2(56, 56)), false)
+
+func _draw_house_interior() -> void:
+	# Roofless top-down house, matching the construction style of Kenney's
+	# preview: visible floors, room divisions, furniture and an open entry.
+	var house := Rect2(Vector2(875, 42), Vector2(330, 250))
+	var inside := house.grow(-14.0)
+	var kitchen := Rect2(inside.position, Vector2(inside.size.x, 88.0))
+	var living := Rect2(inside.position + Vector2(0.0, 88.0), Vector2(inside.size.x, inside.size.y - 88.0))
+	draw_rect(Rect2(Vector2(1018, house.end.y), Vector2(58, 82)), Color("#b8c4c2"))
+	draw_texture_rect(HOUSE_TILE_FLOOR_TEXTURE, kitchen, true)
+	draw_texture_rect(HOUSE_WOOD_FLOOR_TEXTURE, living, true)
+
+	# Orange exterior walls with the dark inner cap used throughout the pack.
+	draw_rect(house, Color("#ef6c16"), false, 14.0)
+	draw_rect(inside, Color("#454545"), false, 8.0)
+	# Interior kitchen wall with a wide doorway.
+	draw_line(Vector2(inside.position.x, kitchen.end.y), Vector2(990, kitchen.end.y), Color("#ef6c16"), 12.0)
+	draw_line(Vector2(1085, kitchen.end.y), Vector2(inside.end.x, kitchen.end.y), Color("#ef6c16"), 12.0)
+	draw_line(Vector2(inside.position.x, kitchen.end.y + 4.0), Vector2(990, kitchen.end.y + 4.0), Color("#454545"), 5.0)
+	draw_line(Vector2(1085, kitchen.end.y + 4.0), Vector2(inside.end.x, kitchen.end.y + 4.0), Color("#454545"), 5.0)
+	# Open front door in the south wall.
+	draw_rect(Rect2(Vector2(1022, house.end.y - 18.0), Vector2(50, 22)), Color("#b57b42"))
+
+	# Kenney furnishings make each room read clearly from above.
+	draw_texture_rect(HOUSE_FRIDGE_TEXTURE, Rect2(Vector2(892, 56), Vector2(58, 58)), false)
+	draw_texture_rect(HOUSE_STOVE_TEXTURE, Rect2(Vector2(950, 56), Vector2(64, 64)), false)
+	draw_texture_rect(HOUSE_CRATE_TEXTURE, Rect2(Vector2(1123, 62), Vector2(54, 54)), false)
+	draw_texture_rect(HOUSE_TABLE_TEXTURE, Rect2(Vector2(935, 188), Vector2(72, 72)), false)
+	draw_texture_rect(HOUSE_SOFA_TEXTURE, Rect2(Vector2(1080, 198), Vector2(92, 58)), false)
+	draw_texture_rect(HOUSE_PLANT_TEXTURE, Rect2(Vector2(1114, 137), Vector2(58, 58)), false)
 
 func _draw_survivor_info_panel() -> void:
 	var panel_size := Vector2(260, 158)
