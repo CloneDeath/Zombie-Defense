@@ -260,9 +260,12 @@ func _update_wave(delta: float) -> void:
 func _spawn_zombie() -> void:
 	var road := _road_rect()
 	var edge_margin := TILE_SIZE * 0.4
+	var spawn_y := randf_range(road.position.y + edge_margin, road.end.y - edge_margin)
 	zombies.append({
 		"x": randf_range(-0.14, -0.08),
-		"y": randf_range(road.position.y + edge_margin, road.end.y - edge_margin),
+		"y": spawn_y,
+		"path_offset": spawn_y - _road_center().y,
+		"turned": false,
 		"hp": ZOMBIE_MAX_HEALTH,
 		"speed_multiplier": randf_range(0.85, 1.15),
 		"movement_factor": 1.0,
@@ -314,10 +317,23 @@ func _update_zombies(delta: float) -> void:
 					_damage_survivor_target(target_id)
 					zombie.attack_cooldown = ZOMBIE_ATTACK_RATE
 		else:
-			zombie.aim_angle = rotate_toward(zombie.aim_angle, 0.0, ZOMBIE_TURN_SPEED * delta)
-			zombie.x += ZOMBIE_SPEED * zombie.speed_multiplier * zombie.movement_factor * delta
+			var zombie_position := _zombie_position(zombie)
+			var path_offset := float(zombie.path_offset)
+			var corner := _road_turn() + Vector2(-path_offset, path_offset)
+			if not bool(zombie.turned) and zombie_position.distance_to(corner) <= 8.0:
+				zombie.turned = true
+			var route_target := Vector2(
+				_road_turn().x - path_offset,
+				_map_size().y + MAP_OVERSCAN
+			) if bool(zombie.turned) else corner
+			var route_direction := zombie_position.direction_to(route_target)
+			var desired_angle := zombie_position.angle_to_point(route_target)
+			zombie.aim_angle = rotate_toward(zombie.aim_angle, desired_angle, ZOMBIE_TURN_SPEED * delta)
+			var route_speed: float = ZOMBIE_SPEED * _map_size().x * zombie.speed_multiplier * zombie.movement_factor
+			zombie.x += route_direction.x * route_speed * delta / _map_size().x
+			zombie.y += route_direction.y * route_speed * delta
 
-		if zombie.x > 1.08:
+		if bool(zombie.turned) and zombie.y > _map_size().y * 1.08:
 			zombies.erase(zombie)
 			zombies_passed += 1
 			health -= 1
@@ -780,7 +796,7 @@ func _pan_map(delta: Vector2) -> void:
 func _minimum_zoom() -> float:
 	var playable_height := maxf(1.0, size.y - 190.0)
 	var map_size := _map_size()
-	return maxf(size.x / map_size.x, playable_height / map_size.y)
+	return maxf(size.x / map_size.x, playable_height / map_size.y) * 0.70
 
 func _map_offset_bounds() -> Dictionary:
 	var map_size := _map_size() * map_zoom
@@ -892,8 +908,8 @@ func _set_selected_survivor_destination(index: int) -> void:
 func _place_survivor(index: int) -> void:
 	survivor_spawn = index
 	survivor_target = _spawn_points()[index]
-	survivor_position = Vector2(_map_size().x + 55.0, survivor_target.y)
-	survivor_aim_angle = PI
+	survivor_position = _survivor_entry_position()
+	survivor_aim_angle = -PI * 0.5
 	survivor_is_walking = true
 	survivor_selected = false
 	dragging_survivor = false
@@ -902,8 +918,8 @@ func _place_survivor(index: int) -> void:
 func _place_baseball_survivor(index: int) -> void:
 	baseball_spawn = index
 	baseball_target = _spawn_points()[index]
-	baseball_position = Vector2(_map_size().x + 55.0, baseball_target.y)
-	baseball_aim_angle = PI
+	baseball_position = _survivor_entry_position()
+	baseball_aim_angle = -PI * 0.5
 	baseball_is_walking = true
 	baseball_selected = false
 	dragging_survivor = false
@@ -928,34 +944,56 @@ func _map_size() -> Vector2:
 func _field_rect() -> Rect2:
 	return Rect2(Vector2.ZERO, _map_size())
 
+func _road_center() -> Vector2:
+	return Vector2(_map_size().x * 0.68, _map_size().y * 0.38)
+
+func _road_turn() -> Vector2:
+	return _road_center()
+
 func _road_rect() -> Rect2:
-	var map_size := _map_size()
-	var road_height := STREET_WIDTH_TILES * TILE_SIZE
+	var half_width := STREET_WIDTH_TILES * TILE_SIZE * 0.5
+	var turn := _road_turn()
 	return Rect2(
 		-MAP_OVERSCAN,
-		(map_size.y - road_height) * 0.5,
-		map_size.x + MAP_OVERSCAN * 2.0,
-		road_height
+		turn.y - half_width,
+		turn.x + half_width + MAP_OVERSCAN,
+		half_width * 2.0
+	)
+
+func _vertical_road_rect() -> Rect2:
+	var half_width := STREET_WIDTH_TILES * TILE_SIZE * 0.5
+	var turn := _road_turn()
+	return Rect2(
+		turn.x - half_width,
+		turn.y - half_width,
+		half_width * 2.0,
+		_map_size().y - turn.y + half_width + MAP_OVERSCAN
 	)
 
 func _sidewalk_rects() -> Array[Rect2]:
-	var road := _road_rect()
+	var horizontal := _road_rect()
+	var vertical := _vertical_road_rect()
 	var sidewalk_width := SIDEWALK_WIDTH_TILES * TILE_SIZE
+	var turn := _road_turn()
+	var half_width := STREET_WIDTH_TILES * TILE_SIZE * 0.5
 	return [
-		Rect2(road.position.x, road.position.y - sidewalk_width, road.size.x, sidewalk_width),
-		Rect2(road.position.x, road.end.y, road.size.x, sidewalk_width)
+		Rect2(horizontal.position.x, horizontal.position.y - sidewalk_width, horizontal.size.x, sidewalk_width),
+		Rect2(horizontal.position.x, horizontal.end.y, turn.x - half_width - horizontal.position.x, sidewalk_width),
+		Rect2(vertical.position.x - sidewalk_width, turn.y + half_width, sidewalk_width, vertical.end.y - turn.y - half_width),
+		Rect2(vertical.end.x, vertical.position.y, sidewalk_width, vertical.size.y)
 	]
 
+func _survivor_entry_position() -> Vector2:
+	return Vector2(_road_turn().x, _map_size().y + 55.0)
+
 func _spawn_points() -> Array[Vector2]:
-	var road := _road_rect()
-	var map_width := _map_size().x
+	var turn := _road_turn()
+	var half_width := STREET_WIDTH_TILES * TILE_SIZE * 0.5
 	return [
-		# Deliberately staggered: two points overlap the road edge and two sit
-		# mostly on the sidewalks.
-		Vector2(map_width * 0.27, road.position.y + TILE_SIZE * 0.22),
-		Vector2(map_width * 0.64, road.position.y - TILE_SIZE * 0.42),
-		Vector2(map_width * 0.41, road.end.y - TILE_SIZE * 0.18),
-		Vector2(map_width * 0.76, road.end.y + TILE_SIZE * 0.38)
+		Vector2(_map_size().x * 0.27, turn.y - half_width - TILE_SIZE * 0.38),
+		Vector2(_map_size().x * 0.49, turn.y + half_width + TILE_SIZE * 0.32),
+		Vector2(turn.x - half_width - TILE_SIZE * 0.34, _map_size().y * 0.64),
+		Vector2(turn.x + half_width + TILE_SIZE * 0.36, _map_size().y * 0.79)
 	]
 
 func _survivor_card_rect() -> Rect2:
@@ -981,12 +1019,14 @@ func _draw() -> void:
 		map_size + Vector2.ONE * MAP_OVERSCAN * 2.0
 	)
 	var road := _road_rect()
+	var vertical_road := _vertical_road_rect()
 
 	# Draw in map space so Kenney's 64 px tiles zoom and pan with the world.
 	draw_set_transform(map_offset, 0.0, Vector2(map_zoom, map_zoom))
 	draw_texture_rect(GRASS_TEXTURE, terrain_extent, true)
 	# Use the asphalt center of the road-edge tile, avoiding repeated lane lines.
 	draw_texture_rect_region(ROAD_TEXTURE, road, Rect2(8, 0, 48, 64))
+	draw_texture_rect_region(ROAD_TEXTURE, vertical_road, Rect2(8, 0, 48, 64))
 	for sidewalk in _sidewalk_rects():
 		draw_texture_rect(SIDEWALK_TEXTURE, sidewalk, true)
 	draw_set_transform(Vector2.ZERO, 0.0)
