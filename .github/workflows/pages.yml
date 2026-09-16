@@ -44,6 +44,11 @@ jobs:
           find /tmp/kenney -type f -path "*/Tiles/tile_01.png" -exec cp {} assets/kenney/grass.png \;
           find /tmp/kenney -type f -path "*/Tiles/tile_28.png" -exec cp {} assets/kenney/road.png \;
           find /tmp/kenney -type f -path "*/Tiles/tile_271.png" -exec cp {} assets/kenney/sidewalk.png \;
+          find /tmp/kenney -type f -path "*/Tiles/tile_183.png" -exec cp {} assets/kenney/tree.png \;
+          find /tmp/kenney -type f -path "*/Tiles/tile_215.png" -exec cp {} assets/kenney/manhole.png \;
+          find /tmp/kenney -type f -path "*/Tiles/tile_292.png" -exec cp {} assets/kenney/debris.png \;
+          find /tmp/kenney -type f -path "*/Tiles/tile_320.png" -exec cp {} assets/kenney/oil_spill.png \;
+          curl -L "https://raw.githubusercontent.com/eturner58/game-assets/main/kenney/2D%20assets/Racing%20Pack/PNG/Cars/car_black_1.png" -o assets/kenney/car.png
           test -f assets/kenney/survivor.png
           test -f assets/kenney/baseball.png
           test -f assets/kenney/soldier.png
@@ -52,6 +57,11 @@ jobs:
           test -f assets/kenney/grass.png
           test -f assets/kenney/road.png
           test -f assets/kenney/sidewalk.png
+          test -f assets/kenney/tree.png
+          test -f assets/kenney/manhole.png
+          test -f assets/kenney/debris.png
+          test -f assets/kenney/oil_spill.png
+          test -f assets/kenney/car.png
       - name: Import Godot project
         run: godot --headless --editor --path . --quit
       - name: Smoke test active gameplay
