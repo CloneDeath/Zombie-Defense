@@ -26,10 +26,10 @@ const SURVIVOR_MAX_HEALTH := 10
 const BASEBALL_MAX_HEALTH := 12
 const BASEBALL_ROAM_METERS := 7.0
 const BASEBALL_MELEE_METERS := 0.75
-const BASEBALL_WAIT_DISTANCE_METERS := 1.5
+const BASEBALL_WAIT_DISTANCE_METERS := 2.0
 const BASEBALL_SPEED := 95.0
 const BASEBALL_RECHARGE_SPEED := 42.0
-const BASEBALL_ATTACK_RATE := 0.8
+const BASEBALL_ATTACK_RATE := 1.5
 const BASEBALL_DAMAGE := 0.5
 const BASEBALL_KNOCKBACK_SPEED := 420.0
 const ZOMBIE_KNOCKBACK_DECELERATION := 1225.0
@@ -829,6 +829,11 @@ func _handle_pointer_down(position: Vector2) -> bool:
 		if index >= 0:
 			_set_selected_survivor_destination(index)
 			return true
+		# Empty map space clears selection and then behaves like a normal map drag.
+		survivor_selected = false
+		baseball_selected = false
+		dragging_unit = ""
+		queue_redraw()
 	return false
 
 func _handle_pointer_up(position: Vector2) -> void:
