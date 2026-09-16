@@ -23,6 +23,8 @@ const ZOMBIE_CHASE_SPEED := 55.0
 const ZOMBIE_ATTACK_RANGE := 34.0
 const ZOMBIE_ATTACK_RATE := 0.8
 const ZOMBIE_COLLISION_DIAMETER := 44.0
+const SURVIVOR_COLLISION_RADIUS := 22.0
+const ZOMBIE_COLLISION_RADIUS := 22.0
 const ZOMBIE_HIT_KNOCKBACK := 12.0
 const ZOMBIE_ACCELERATION := 1.8
 const ZOMBIE_TURN_SPEED := 0.85
@@ -252,6 +254,8 @@ func _process(delta: float) -> void:
 		return
 	_update_survivor(delta)
 	_update_baseball_survivor(delta)
+	_separate_survivors_and_zombies()
+	_separate_survivors()
 
 	for shot in shots.duplicate():
 		shot.life -= delta
@@ -403,6 +407,38 @@ func _separate_zombies() -> void:
 			first.y = first_position.y
 			second.x = second_position.x / map_width
 			second.y = second_position.y
+
+func _separate_survivors_and_zombies() -> void:
+	var minimum_distance := SURVIVOR_COLLISION_RADIUS + ZOMBIE_COLLISION_RADIUS
+	for zombie in zombies:
+		var zombie_position := _zombie_position(zombie)
+		var survivor_positions: Array[Vector2] = []
+		if survivor_spawn >= 0 and survivor_alive:
+			survivor_positions.append(survivor_position)
+		if baseball_spawn >= 0 and baseball_alive:
+			survivor_positions.append(baseball_position)
+		for unit_position in survivor_positions:
+			var difference := zombie_position - unit_position
+			var distance := difference.length()
+			if distance >= minimum_distance:
+				continue
+			var direction := difference / distance if distance > 0.001 else Vector2.RIGHT.rotated(randf() * TAU)
+			zombie_position += direction * (minimum_distance - distance)
+		zombie.x = zombie_position.x / _map_size().x
+		zombie.y = zombie_position.y
+
+func _separate_survivors() -> void:
+	if survivor_spawn < 0 or not survivor_alive or baseball_spawn < 0 or not baseball_alive:
+		return
+	var difference := baseball_position - survivor_position
+	var distance := difference.length()
+	var minimum_distance := SURVIVOR_COLLISION_RADIUS * 2.0
+	if distance >= minimum_distance:
+		return
+	var direction := difference / distance if distance > 0.001 else Vector2.RIGHT
+	var correction := direction * (minimum_distance - distance) * 0.5
+	survivor_position -= correction
+	baseball_position += correction
 
 func _survivor_target_alive(target_id: String) -> bool:
 	if target_id == "cop":
