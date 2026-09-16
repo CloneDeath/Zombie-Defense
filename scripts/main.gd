@@ -293,6 +293,11 @@ func _update_zombies(delta: float) -> void:
 				Vector2.ZERO,
 				ZOMBIE_KNOCKBACK_DECELERATION * delta
 			)
+		# Chasing can carry a zombie through the bend before it reaches the normal
+		# corner waypoint. Once it is south of the corner, keep it southbound.
+		var corner_bottom := _road_turn().y + STREET_WIDTH_TILES * TILE_SIZE * 0.5
+		if not bool(zombie.turned) and _zombie_position(zombie).y > corner_bottom:
+			zombie.turned = true
 		var target_id := String(zombie.target_id)
 		if target_id != "" and not _survivor_target_alive(target_id):
 			zombie.target_id = ""
