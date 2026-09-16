@@ -28,7 +28,7 @@ const CAMERA_SPRING_SPEED := 11.0
 const OVERSCROLL_RESISTANCE := 0.32
 const ZOMBIE_SPEED := 0.069
 const ZOMBIE_CHASE_SPEED := 55.0
-const ZOMBIE_ATTACK_RANGE := 34.0
+const ZOMBIE_ATTACK_RANGE := 46.0
 const ZOMBIE_ATTACK_RATE := 0.8
 const ZOMBIE_COLLISION_DIAMETER := 44.0
 const SURVIVOR_COLLISION_RADIUS := 22.0
@@ -64,6 +64,7 @@ const BLOOD_PARTICLE_LIFE := 0.45
 const LEVEL_UP_EFFECT_LIFE := 1.25
 const SURVIVOR_SPEED := 120.0
 const SURVIVOR_COMBAT_SPEED := 40.0
+const OFF_MAP_SURVIVOR_SPEED_MULTIPLIER := 4.0
 const STREET_WIDTH_TILES := 6
 const SIDEWALK_WIDTH_TILES := 1
 const SURVIVOR_RANGE_METERS := 5.0
@@ -100,6 +101,8 @@ var baseball_selected := false
 var baseball_position := Vector2.ZERO
 var baseball_target := Vector2.ZERO
 var baseball_is_walking := false
+var baseball_retreating := false
+var baseball_evacuated := false
 var baseball_aim_angle := PI
 var baseball_attack_cooldown := 0.0
 var baseball_swing_time := 0.0
@@ -118,6 +121,8 @@ var is_reloading := false
 var survivor_position := Vector2.ZERO
 var survivor_target := Vector2.ZERO
 var survivor_is_walking := false
+var survivor_retreating := false
+var survivor_evacuated := false
 var survivor_aim_angle := PI
 var shots: Array[Dictionary] = []
 var blood_particles: Array[Dictionary] = []
@@ -140,6 +145,7 @@ var retry_button: Button
 var menu_button: Button
 var pause_button: Button
 var fast_forward_button: Button
+var retreat_button: Button
 
 func _ready() -> void:
 	title_label = _make_label(38, Color.WHITE)
@@ -163,6 +169,8 @@ func _ready() -> void:
 	pause_button.pressed.connect(_toggle_pause)
 	fast_forward_button = _make_button("FF")
 	fast_forward_button.pressed.connect(_toggle_fast_forward)
+	retreat_button = _make_button("RETREAT")
+	retreat_button.pressed.connect(_retreat_survivors)
 	_show_menu()
 	_layout_ui()
 	if DisplayServer.get_name() == "headless":
@@ -235,6 +243,9 @@ func _layout_ui() -> void:
 	fast_forward_button.position = Vector2(100, 8)
 	fast_forward_button.size = Vector2(58, 34)
 	fast_forward_button.add_theme_font_size_override("font_size", 14)
+	retreat_button.position = Vector2(166, 8)
+	retreat_button.size = Vector2(108, 34)
+	retreat_button.add_theme_font_size_override("font_size", 14)
 
 func _toggle_pause() -> void:
 	game_paused = not game_paused
@@ -244,6 +255,19 @@ func _toggle_pause() -> void:
 func _toggle_fast_forward() -> void:
 	fast_forward = not fast_forward
 	fast_forward_button.text = "2X" if fast_forward else "FF"
+
+func _retreat_survivors() -> void:
+	var has_survivor_to_retreat := false
+	if survivor_spawn >= 0 and survivor_alive and not survivor_evacuated:
+		survivor_retreating = true
+		survivor_selected = false
+		has_survivor_to_retreat = true
+	if baseball_spawn >= 0 and baseball_alive and not baseball_evacuated:
+		baseball_retreating = true
+		baseball_selected = false
+		has_survivor_to_retreat = true
+	retreat_button.disabled = has_survivor_to_retreat
+	queue_redraw()
 
 func _process(delta: float) -> void:
 	if screen != "playing":
@@ -433,9 +457,9 @@ func _separate_survivors_and_zombies() -> void:
 	for zombie in zombies:
 		var zombie_position := _zombie_position(zombie)
 		var survivor_positions: Array[Vector2] = []
-		if survivor_spawn >= 0 and survivor_alive:
+		if survivor_spawn >= 0 and survivor_alive and not survivor_evacuated:
 			survivor_positions.append(survivor_position)
-		if baseball_spawn >= 0 and baseball_alive:
+		if baseball_spawn >= 0 and baseball_alive and not baseball_evacuated:
 			survivor_positions.append(baseball_position)
 		for unit_position in survivor_positions:
 			var difference := zombie_position - unit_position
@@ -448,7 +472,7 @@ func _separate_survivors_and_zombies() -> void:
 		zombie.y = zombie_position.y
 
 func _separate_survivors() -> void:
-	if survivor_spawn < 0 or not survivor_alive or baseball_spawn < 0 or not baseball_alive:
+	if survivor_spawn < 0 or not survivor_alive or survivor_evacuated or baseball_spawn < 0 or not baseball_alive or baseball_evacuated:
 		return
 	var difference := baseball_position - survivor_position
 	var distance := difference.length()
@@ -462,9 +486,9 @@ func _separate_survivors() -> void:
 
 func _survivor_target_alive(target_id: String) -> bool:
 	if target_id == "cop":
-		return survivor_spawn >= 0 and survivor_alive
+		return survivor_spawn >= 0 and survivor_alive and not survivor_evacuated
 	if target_id == "baseball":
-		return baseball_spawn >= 0 and baseball_alive
+		return baseball_spawn >= 0 and baseball_alive and not baseball_evacuated
 	return false
 
 func _survivor_target_position(target_id: String) -> Vector2:
@@ -501,7 +525,19 @@ func _kill_baseball_survivor() -> void:
 			zombie.target_id = ""
 
 func _update_survivor(delta: float) -> void:
-	if survivor_spawn < 0 or not survivor_alive:
+	if survivor_spawn < 0 or not survivor_alive or survivor_evacuated:
+		return
+	if survivor_retreating:
+		survivor_target = _survivor_entry_position()
+		survivor_is_walking = true
+		var retreat_angle := survivor_position.angle_to_point(survivor_target)
+		survivor_aim_angle = rotate_toward(survivor_aim_angle, retreat_angle, SURVIVOR_TURN_SPEED * delta)
+		var retreat_speed := _survivor_travel_speed(survivor_position, SURVIVOR_SPEED)
+		survivor_position = _move_around_car(survivor_position, survivor_target, retreat_speed * delta)
+		if survivor_position.distance_to(survivor_target) <= 1.0:
+			survivor_evacuated = true
+			survivor_is_walking = false
+			_clear_zombie_target("cop")
 		return
 
 	if is_reloading:
@@ -540,19 +576,33 @@ func _update_survivor(delta: float) -> void:
 			_shoot(target)
 		survivor_is_walking = distance_to_destination > 1.0
 		if survivor_is_walking:
+			var combat_speed := _survivor_travel_speed(survivor_position, SURVIVOR_COMBAT_SPEED)
 			survivor_position = _move_around_car(
 				survivor_position,
 				survivor_target,
-				SURVIVOR_COMBAT_SPEED * delta
+				combat_speed * delta
 			)
 	elif distance_to_destination > 1.0:
 		survivor_is_walking = true
-		survivor_position = _move_around_car(survivor_position, survivor_target, SURVIVOR_SPEED * delta)
+		var travel_speed := _survivor_travel_speed(survivor_position, SURVIVOR_SPEED)
+		survivor_position = _move_around_car(survivor_position, survivor_target, travel_speed * delta)
 	else:
 		survivor_is_walking = false
 
 func _update_baseball_survivor(delta: float) -> void:
-	if baseball_spawn < 0 or not baseball_alive:
+	if baseball_spawn < 0 or not baseball_alive or baseball_evacuated:
+		return
+	if baseball_retreating:
+		baseball_target = _survivor_entry_position()
+		baseball_is_walking = true
+		var retreat_angle := baseball_position.angle_to_point(baseball_target)
+		baseball_aim_angle = rotate_toward(baseball_aim_angle, retreat_angle, SURVIVOR_TURN_SPEED * delta)
+		var retreat_speed := _survivor_travel_speed(baseball_position, BASEBALL_SPEED)
+		baseball_position = _move_around_car(baseball_position, baseball_target, retreat_speed * delta)
+		if baseball_position.distance_to(baseball_target) <= 1.0:
+			baseball_evacuated = true
+			baseball_is_walking = false
+			_clear_zombie_target("baseball")
 		return
 
 	baseball_target = _spawn_points()[baseball_spawn]
@@ -580,19 +630,30 @@ func _update_baseball_survivor(delta: float) -> void:
 			_swing_bat(target)
 		else:
 			baseball_is_walking = true
-			baseball_position = _move_around_car(baseball_position, target_position, BASEBALL_SPEED * delta)
+			var chase_speed := _survivor_travel_speed(baseball_position, BASEBALL_SPEED)
+			baseball_position = _move_around_car(baseball_position, target_position, chase_speed * delta)
 	else:
 		var distance_home := baseball_position.distance_to(baseball_target)
 		if distance_home > 1.0:
 			baseball_is_walking = true
 			var home_angle := baseball_position.angle_to_point(baseball_target)
 			baseball_aim_angle = rotate_toward(baseball_aim_angle, home_angle, SURVIVOR_TURN_SPEED * delta)
-			baseball_position = _move_around_car(baseball_position, baseball_target, BASEBALL_SPEED * delta)
+			var travel_speed := _survivor_travel_speed(baseball_position, BASEBALL_SPEED)
+			baseball_position = _move_around_car(baseball_position, baseball_target, travel_speed * delta)
 		else:
 			baseball_is_walking = false
 
 func _car_rect() -> Rect2:
 	return Rect2(Vector2(555, 590), Vector2(96, 177))
+
+func _survivor_travel_speed(position: Vector2, base_speed: float) -> float:
+	var playable_map := Rect2(Vector2.ZERO, _map_size())
+	return base_speed * OFF_MAP_SURVIVOR_SPEED_MULTIPLIER if not playable_map.has_point(position) else base_speed
+
+func _clear_zombie_target(target_id: String) -> void:
+	for zombie in zombies:
+		if String(zombie.target_id) == target_id:
+			zombie.target_id = ""
 
 func _segment_intersects_rect(from: Vector2, to: Vector2, rect: Rect2) -> bool:
 	if rect.has_point(from) or rect.has_point(to):
@@ -817,6 +878,8 @@ func _start_game() -> void:
 	baseball_position = Vector2.ZERO
 	baseball_target = Vector2.ZERO
 	baseball_is_walking = false
+	baseball_retreating = false
+	baseball_evacuated = false
 	baseball_aim_angle = PI
 	baseball_attack_cooldown = 0.0
 	baseball_swing_time = 0.0
@@ -831,6 +894,8 @@ func _start_game() -> void:
 	reload_time_remaining = 0.0
 	is_reloading = false
 	survivor_aim_angle = PI
+	survivor_retreating = false
+	survivor_evacuated = false
 	shots.clear()
 	blood_particles.clear()
 	level_up_effects.clear()
@@ -842,6 +907,7 @@ func _start_game() -> void:
 	fast_forward = false
 	pause_button.text = "PAUSE"
 	fast_forward_button.text = "FF"
+	retreat_button.disabled = false
 	title_label.hide()
 	results_label.hide()
 	begin_button.hide()
@@ -849,6 +915,7 @@ func _start_game() -> void:
 	menu_button.hide()
 	pause_button.show()
 	fast_forward_button.show()
+	retreat_button.show()
 	health_label.show()
 	queue_redraw()
 
@@ -863,6 +930,7 @@ func _show_menu() -> void:
 	menu_button.hide()
 	pause_button.hide()
 	fast_forward_button.hide()
+	retreat_button.hide()
 	queue_redraw()
 
 func _show_results() -> void:
@@ -877,13 +945,14 @@ func _show_results() -> void:
 	menu_button.show()
 	pause_button.hide()
 	fast_forward_button.hide()
+	retreat_button.hide()
 	queue_redraw()
 
 func _input(event: InputEvent) -> void:
 	if screen != "playing":
 		return
 	if event is InputEventScreenTouch or event is InputEventScreenDrag or event is InputEventMouseButton or event is InputEventMouseMotion:
-		if pause_button.get_global_rect().has_point(event.position) or fast_forward_button.get_global_rect().has_point(event.position):
+		if pause_button.get_global_rect().has_point(event.position) or fast_forward_button.get_global_rect().has_point(event.position) or retreat_button.get_global_rect().has_point(event.position):
 			return
 
 	if event is InputEventScreenTouch:
@@ -1032,11 +1101,11 @@ func _screen_to_map(screen_position: Vector2) -> Vector2:
 func _handle_pointer_down(position: Vector2) -> bool:
 	var touched_cop := (
 		(survivor_spawn < 0 and _survivor_card_rect().has_point(position))
-		or (survivor_spawn >= 0 and survivor_alive and _map_to_screen(survivor_position).distance_to(position) <= 42.0)
+		or (survivor_spawn >= 0 and survivor_alive and not survivor_retreating and not survivor_evacuated and _map_to_screen(survivor_position).distance_to(position) <= 42.0)
 	)
 	var touched_baseball := (
 		(baseball_spawn < 0 and _baseball_card_rect().has_point(position))
-		or (baseball_spawn >= 0 and baseball_alive and _map_to_screen(baseball_position).distance_to(position) <= 42.0)
+		or (baseball_spawn >= 0 and baseball_alive and not baseball_retreating and not baseball_evacuated and _map_to_screen(baseball_position).distance_to(position) <= 42.0)
 	)
 	if touched_cop or touched_baseball:
 		dragging_unit = "cop" if touched_cop else "baseball"
@@ -1257,7 +1326,7 @@ func _draw() -> void:
 		if not occupied:
 			draw_string(ThemeDB.fallback_font, point + Vector2(-7, 7), "+", HORIZONTAL_ALIGNMENT_CENTER, 14, 22, point_color)
 
-	if survivor_spawn >= 0:
+	if survivor_spawn >= 0 and not survivor_evacuated:
 		var survivor_screen := _map_to_screen(survivor_position)
 		if survivor_alive and survivor_is_walking:
 			var destination_screen := _map_to_screen(survivor_target)
@@ -1284,7 +1353,7 @@ func _draw() -> void:
 		draw_rect(Rect2(survivor_bar, Vector2(56, 6)), Color("#251f1f"))
 		draw_rect(Rect2(survivor_bar, Vector2(56.0 * survivor_health / survivor_max_health, 6)), Color("#63d471"))
 
-	if baseball_spawn >= 0:
+	if baseball_spawn >= 0 and not baseball_evacuated:
 		var baseball_screen := _map_to_screen(baseball_position)
 		if baseball_alive and baseball_selected:
 			var home_screen := _map_to_screen(baseball_target)
@@ -1360,9 +1429,9 @@ func _draw() -> void:
 		var drag_texture: Texture2D = SURVIVOR_TEXTURE if dragging_unit == "cop" else BASEBALL_TEXTURE
 		draw_texture_rect(drag_texture, Rect2(drag_position - Vector2(38, 32), Vector2(76, 64)), false, Color(1, 1, 1, 0.75))
 
-	if survivor_selected and survivor_spawn >= 0:
+	if survivor_selected and survivor_spawn >= 0 and not survivor_evacuated:
 		_draw_survivor_info_panel()
-	elif baseball_selected and baseball_spawn >= 0:
+	elif baseball_selected and baseball_spawn >= 0 and not baseball_evacuated:
 		_draw_baseball_info_panel()
 
 func _draw_decor() -> void:
