@@ -303,8 +303,8 @@ func _spawn_zombie() -> void:
 	zombies.append({
 		"x": (-MAP_OVERSCAN - TILE_SIZE) / _map_size().x,
 		"y": spawn_y,
-		"path_offset": spawn_y - _road_center().y,
-		"turned": false,
+		"path_offset": spawn_y - _upper_road_y(),
+		"route_segment": 0,
 		"hp": ZOMBIE_MAX_HEALTH,
 		"speed_multiplier": randf_range(0.85, 1.15),
 		"movement_factor": 1.0,
@@ -332,11 +332,15 @@ func _update_zombies(delta: float) -> void:
 				Vector2.ZERO,
 				ZOMBIE_KNOCKBACK_DECELERATION * delta
 			)
-		# Chasing can carry a zombie through the bend before it reaches the normal
-		# corner waypoint. Once it is south of the corner, keep it southbound.
-		var corner_bottom := _road_turn().y + STREET_WIDTH_TILES * TILE_SIZE * 0.5
-		if not bool(zombie.turned) and _zombie_position(zombie).y > corner_bottom:
-			zombie.turned = true
+		# Preserve route progress when a chase carries a zombie through either turn.
+		var route_position := _zombie_position(zombie)
+		var route_segment := int(zombie.route_segment)
+		var half_road := STREET_WIDTH_TILES * TILE_SIZE * 0.5
+		if route_segment == 0 and route_position.x >= _main_road_x() - half_road:
+			route_segment = 1
+		if route_segment <= 1 and route_position.x >= _main_road_x() - half_road and route_position.y >= _lower_road_y() - half_road:
+			route_segment = 2
+		zombie.route_segment = route_segment
 		var target_id := String(zombie.target_id)
 		if target_id != "" and not _survivor_target_alive(target_id):
 			zombie.target_id = ""
@@ -363,13 +367,21 @@ func _update_zombies(delta: float) -> void:
 		else:
 			var zombie_position := _zombie_position(zombie)
 			var path_offset := float(zombie.path_offset)
-			var corner := _road_turn() + Vector2(-path_offset, path_offset)
-			if not bool(zombie.turned) and zombie_position.distance_to(corner) <= 8.0:
-				zombie.turned = true
-			var route_target := Vector2(
-				_road_turn().x - path_offset,
-				_map_size().y + MAP_OVERSCAN
-			) if bool(zombie.turned) else corner
+			var segment := int(zombie.route_segment)
+			var first_turn := Vector2(_main_road_x() - path_offset, _upper_road_y() + path_offset)
+			var second_turn := Vector2(_main_road_x() - path_offset, _lower_road_y() - path_offset)
+			var route_target := first_turn
+			if segment == 1:
+				route_target = second_turn
+			elif segment >= 2:
+				route_target = Vector2(_route_exit_x(), _lower_road_y() - path_offset)
+			if zombie_position.distance_to(route_target) <= 8.0 and segment < 2:
+				segment += 1
+				zombie.route_segment = segment
+				if segment == 1:
+					route_target = second_turn
+				else:
+					route_target = Vector2(_route_exit_x(), _lower_road_y() - path_offset)
 			var route_direction := zombie_position.direction_to(route_target)
 			var desired_angle := zombie_position.angle_to_point(route_target)
 			zombie.aim_angle = rotate_toward(zombie.aim_angle, desired_angle, ZOMBIE_TURN_SPEED * delta)
@@ -377,7 +389,7 @@ func _update_zombies(delta: float) -> void:
 			zombie.x += route_direction.x * route_speed * delta / _map_size().x
 			zombie.y += route_direction.y * route_speed * delta
 
-		if bool(zombie.turned) and zombie.y > _map_size().y * 1.08:
+		if int(zombie.route_segment) >= 2 and _zombie_position(zombie).x > _route_exit_x():
 			zombies.erase(zombie)
 			zombies_passed += 1
 			health -= 1
@@ -572,7 +584,7 @@ func _update_baseball_survivor(delta: float) -> void:
 			baseball_is_walking = false
 
 func _car_rect() -> Rect2:
-	return Rect2(Vector2(755, 1010), Vector2(96, 177))
+	return Rect2(Vector2(555, 590), Vector2(96, 177))
 
 func _segment_intersects_rect(from: Vector2, to: Vector2, rect: Rect2) -> bool:
 	if rect.has_point(from) or rect.has_point(to):
@@ -1074,7 +1086,7 @@ func _place_survivor(index: int) -> void:
 	survivor_spawn = index
 	survivor_target = _spawn_points()[index]
 	survivor_position = _survivor_entry_position()
-	survivor_aim_angle = -PI * 0.5
+	survivor_aim_angle = PI
 	survivor_is_walking = true
 	survivor_selected = false
 	dragging_survivor = false
@@ -1084,7 +1096,7 @@ func _place_baseball_survivor(index: int) -> void:
 	baseball_spawn = index
 	baseball_target = _spawn_points()[index]
 	baseball_position = _survivor_entry_position()
-	baseball_aim_angle = -PI * 0.5
+	baseball_aim_angle = PI
 	baseball_is_walking = true
 	baseball_selected = false
 	dragging_survivor = false
@@ -1109,59 +1121,78 @@ func _map_size() -> Vector2:
 func _field_rect() -> Rect2:
 	return Rect2(Vector2.ZERO, _map_size())
 
-func _road_center() -> Vector2:
-	# Keep the bend aligned to whole tiles so sidewalk pieces meet cleanly.
-	return Vector2(TILE_SIZE * 14.0, TILE_SIZE * 8.0)
+func _main_road_x() -> float:
+	return TILE_SIZE * 10.0
 
-func _road_turn() -> Vector2:
-	return _road_center()
+func _upper_road_y() -> float:
+	return TILE_SIZE * 6.0
+
+func _lower_road_y() -> float:
+	return TILE_SIZE * 14.0
+
+func _route_exit_x() -> float:
+	return _map_size().x + MAP_OVERSCAN + TILE_SIZE
 
 func _road_rect() -> Rect2:
 	var half_width := STREET_WIDTH_TILES * TILE_SIZE * 0.5
-	var turn := _road_turn()
 	return Rect2(
 		-MAP_OVERSCAN,
-		turn.y - half_width,
-		turn.x + half_width + MAP_OVERSCAN,
+		_upper_road_y() - half_width,
+		_main_road_x() + half_width + MAP_OVERSCAN,
+		half_width * 2.0
+	)
+
+func _right_road_rect() -> Rect2:
+	var half_width := STREET_WIDTH_TILES * TILE_SIZE * 0.5
+	return Rect2(
+		_main_road_x() - half_width,
+		_lower_road_y() - half_width,
+		_map_size().x - _main_road_x() + half_width + MAP_OVERSCAN,
 		half_width * 2.0
 	)
 
 func _vertical_road_rect() -> Rect2:
 	var half_width := STREET_WIDTH_TILES * TILE_SIZE * 0.5
-	var turn := _road_turn()
 	return Rect2(
-		turn.x - half_width,
-		turn.y - half_width,
+		_main_road_x() - half_width,
+		-MAP_OVERSCAN,
 		half_width * 2.0,
-		_map_size().y - turn.y + half_width + MAP_OVERSCAN
+		_map_size().y + MAP_OVERSCAN * 2.0
 	)
 
 func _sidewalk_rects() -> Array[Rect2]:
-	var horizontal := _road_rect()
+	var left_road := _road_rect()
+	var right_road := _right_road_rect()
 	var vertical := _vertical_road_rect()
-	var sidewalk_width := SIDEWALK_WIDTH_TILES * TILE_SIZE
-	var turn := _road_turn()
+	var sidewalk := SIDEWALK_WIDTH_TILES * TILE_SIZE
 	var half_width := STREET_WIDTH_TILES * TILE_SIZE * 0.5
+	var upper_top := _upper_road_y() - half_width
+	var upper_bottom := _upper_road_y() + half_width
+	var lower_top := _lower_road_y() - half_width
+	var lower_bottom := _lower_road_y() + half_width
 	return [
-		Rect2(horizontal.position.x, horizontal.position.y - sidewalk_width, horizontal.size.x, sidewalk_width),
-		Rect2(horizontal.position.x, horizontal.end.y, turn.x - half_width - horizontal.position.x, sidewalk_width),
-		Rect2(vertical.position.x - sidewalk_width, turn.y + half_width, sidewalk_width, vertical.end.y - turn.y - half_width),
-		Rect2(vertical.end.x, vertical.position.y, sidewalk_width, vertical.size.y),
-		# Fill the outside elbow where the top and right sidewalks meet.
-		Rect2(vertical.end.x, horizontal.position.y - sidewalk_width, sidewalk_width, sidewalk_width)
+		Rect2(left_road.position.x, upper_top - sidewalk, vertical.position.x - left_road.position.x, sidewalk),
+		Rect2(left_road.position.x, upper_bottom, vertical.position.x - left_road.position.x, sidewalk),
+		Rect2(vertical.end.x, lower_top - sidewalk, right_road.end.x - vertical.end.x, sidewalk),
+		Rect2(vertical.end.x, lower_bottom, right_road.end.x - vertical.end.x, sidewalk),
+		Rect2(vertical.position.x - sidewalk, vertical.position.y, sidewalk, upper_top - vertical.position.y),
+		Rect2(vertical.end.x, vertical.position.y, sidewalk, upper_top - vertical.position.y),
+		Rect2(vertical.position.x - sidewalk, upper_bottom, sidewalk, lower_top - upper_bottom),
+		Rect2(vertical.end.x, upper_bottom, sidewalk, lower_top - upper_bottom),
+		Rect2(vertical.position.x - sidewalk, lower_bottom, sidewalk, vertical.end.y - lower_bottom),
+		Rect2(vertical.end.x, lower_bottom, sidewalk, vertical.end.y - lower_bottom)
 	]
 
 func _survivor_entry_position() -> Vector2:
-	return Vector2(_road_turn().x, _map_size().y + 55.0)
+	return Vector2(_route_exit_x(), _lower_road_y())
 
 func _spawn_points() -> Array[Vector2]:
-	var turn := _road_turn()
 	var half_width := STREET_WIDTH_TILES * TILE_SIZE * 0.5
 	return [
-		Vector2(_map_size().x * 0.27, turn.y - half_width - TILE_SIZE * 0.38),
-		Vector2(_map_size().x * 0.49, turn.y + half_width + TILE_SIZE * 0.32),
-		Vector2(turn.x - half_width - TILE_SIZE * 0.34, _map_size().y * 0.64),
-		Vector2(turn.x + half_width + TILE_SIZE * 0.36, _map_size().y * 0.79)
+		Vector2(TILE_SIZE * 4.5, _upper_road_y() - half_width - TILE_SIZE * 0.35),
+		Vector2(TILE_SIZE * 5.8, _upper_road_y() + half_width + TILE_SIZE * 0.35),
+		Vector2(TILE_SIZE * 13.7, _lower_road_y() - half_width - TILE_SIZE * 0.35),
+		Vector2(TILE_SIZE * 16.2, _lower_road_y() + half_width + TILE_SIZE * 0.35)
 	]
 
 func _survivor_card_rect() -> Rect2:
@@ -1186,27 +1217,17 @@ func _draw() -> void:
 		Vector2(-MAP_OVERSCAN, -MAP_OVERSCAN),
 		map_size + Vector2.ONE * MAP_OVERSCAN * 2.0
 	)
-	var road := _road_rect()
+	var left_road := _road_rect()
+	var right_road := _right_road_rect()
 	var vertical_road := _vertical_road_rect()
 
 	# Draw in map space so Kenney's 64 px tiles zoom and pan with the world.
 	draw_set_transform(map_offset, 0.0, Vector2(map_zoom, map_zoom))
 	draw_texture_rect(GRASS_TEXTURE, terrain_extent, true)
-	# Draw three non-overlapping pieces so the two stretched textures do not
-	# create a visible seam through the middle of the turn.
-	var approach_road := Rect2(
-		road.position,
-		Vector2(vertical_road.position.x - road.position.x, road.size.y)
-	)
-	var corner_road := Rect2(vertical_road.position, Vector2(vertical_road.size.x, road.size.y))
-	var exit_road := Rect2(
-		Vector2(vertical_road.position.x, road.end.y),
-		Vector2(vertical_road.size.x, vertical_road.end.y - road.end.y)
-	)
 	var asphalt_color := Color("#4b4b4b")
-	draw_rect(approach_road, asphalt_color)
-	draw_rect(corner_road, asphalt_color)
-	draw_rect(exit_road, asphalt_color)
+	draw_rect(left_road, asphalt_color)
+	draw_rect(vertical_road, asphalt_color)
+	draw_rect(right_road, asphalt_color)
 	for sidewalk in _sidewalk_rects():
 		draw_texture_rect(SIDEWALK_TEXTURE, sidewalk, true)
 	_draw_decor()
@@ -1335,32 +1356,37 @@ func _draw() -> void:
 		_draw_baseball_info_panel()
 
 func _draw_decor() -> void:
-	# Static scenery stays clear of the route and placement nodes for now.
+	# A simple rural house lot in the northeast corner.
+	var house := Rect2(Vector2(930, 35), Vector2(245, 145))
+	draw_rect(Rect2(Vector2(955, 180), Vector2(72, 76)), Color("#b8c4c2"))
+	draw_rect(house, Color("#9b583c"))
+	draw_rect(house.grow(-14.0), Color("#d7b27b"))
+	draw_rect(Rect2(Vector2(1030, 132), Vector2(42, 48)), Color("#69452f"))
+	draw_rect(Rect2(Vector2(960, 72), Vector2(48, 38)), Color("#8fc4d1"))
+	draw_rect(Rect2(Vector2(1100, 72), Vector2(48, 38)), Color("#8fc4d1"))
+
 	var tree_positions: Array[Vector2] = [
-		Vector2(150, 145),
-		Vector2(460, 175),
-		Vector2(1180, 165),
-		Vector2(155, 985),
-		Vector2(455, 1130),
-		Vector2(1200, 1040)
+		Vector2(120, 80),
+		Vector2(330, 90),
+		Vector2(830, 105),
+		Vector2(1210, 170),
+		Vector2(125, 680),
+		Vector2(285, 790),
+		Vector2(1040, 575),
+		Vector2(1190, 620),
+		Vector2(155, 1180),
+		Vector2(1110, 1190)
 	]
 	for tree_position in tree_positions:
-		draw_texture_rect(
-			TREE_TEXTURE,
-			Rect2(tree_position - Vector2(48, 48), Vector2(96, 96)),
-			false
-		)
+		draw_texture_rect(TREE_TEXTURE, Rect2(tree_position - Vector2(48, 48), Vector2(96, 96)), false)
 
-	# Road-level details.
-	draw_texture_rect(MANHOLE_TEXTURE, Rect2(Vector2(330, 480), Vector2(48, 48)), false)
-	draw_texture_rect(MANHOLE_TEXTURE, Rect2(Vector2(872, 930), Vector2(48, 48)), false)
-	draw_texture_rect(OIL_SPILL_TEXTURE, Rect2(Vector2(505, 548), Vector2(58, 58)), false)
-	draw_texture_rect(OIL_SPILL_TEXTURE, Rect2(Vector2(952, 770), Vector2(54, 54)), false)
-
-	# Larger roadside clutter.
+	draw_texture_rect(MANHOLE_TEXTURE, Rect2(Vector2(260, 360), Vector2(48, 48)), false)
+	draw_texture_rect(MANHOLE_TEXTURE, Rect2(Vector2(930, 875), Vector2(48, 48)), false)
+	draw_texture_rect(OIL_SPILL_TEXTURE, Rect2(Vector2(465, 425), Vector2(58, 58)), false)
+	draw_texture_rect(OIL_SPILL_TEXTURE, Rect2(Vector2(760, 820), Vector2(54, 54)), false)
 	draw_texture_rect(CAR_TEXTURE, _car_rect(), false)
-	draw_texture_rect(DEBRIS_TEXTURE, Rect2(Vector2(610, 735), Vector2(64, 64)), false)
-	draw_texture_rect(DEBRIS_TEXTURE, Rect2(Vector2(1125, 420), Vector2(56, 56)), false)
+	draw_texture_rect(DEBRIS_TEXTURE, Rect2(Vector2(410, 610), Vector2(64, 64)), false)
+	draw_texture_rect(DEBRIS_TEXTURE, Rect2(Vector2(1085, 650), Vector2(56, 56)), false)
 
 func _draw_survivor_info_panel() -> void:
 	var panel_size := Vector2(260, 158)
