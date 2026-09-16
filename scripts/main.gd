@@ -647,8 +647,11 @@ func _car_rect() -> Rect2:
 	return Rect2(Vector2(555, 590), Vector2(96, 177))
 
 func _survivor_travel_speed(position: Vector2, base_speed: float) -> float:
-	var playable_map := Rect2(Vector2.ZERO, _map_size())
-	return base_speed * OFF_MAP_SURVIVOR_SPEED_MULTIPLIER if not playable_map.has_point(position) else base_speed
+	# Only fast-travel while fully off-screen. Using the viewport instead of the
+	# map boundary keeps zooming and panning from exposing a boosted survivor.
+	var screen_position := _map_to_screen(position)
+	var visible_area := Rect2(Vector2(-64.0, -64.0), size + Vector2(128.0, 128.0))
+	return base_speed * OFF_MAP_SURVIVOR_SPEED_MULTIPLIER if not visible_area.has_point(screen_position) else base_speed
 
 func _clear_zombie_target(target_id: String) -> void:
 	for zombie in zombies:
