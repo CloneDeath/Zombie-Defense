@@ -6,6 +6,11 @@ const BASEBALL_TEXTURE := preload("res://assets/kenney/baseball.png")
 const GRASS_TEXTURE := preload("res://assets/kenney/grass.png")
 const ROAD_TEXTURE := preload("res://assets/kenney/road.png")
 const SIDEWALK_TEXTURE := preload("res://assets/kenney/sidewalk.png")
+const TREE_TEXTURE := preload("res://assets/kenney/tree.png")
+const CAR_TEXTURE := preload("res://assets/kenney/car.png")
+const MANHOLE_TEXTURE := preload("res://assets/kenney/manhole.png")
+const DEBRIS_TEXTURE := preload("res://assets/kenney/debris.png")
+const OIL_SPILL_TEXTURE := preload("res://assets/kenney/oil_spill.png")
 const STARTING_HEALTH := 10
 const TILE_SIZE := 64.0
 const MAP_SIZE_TILES := 20
@@ -1093,6 +1098,7 @@ func _draw() -> void:
 	draw_rect(exit_road, asphalt_color)
 	for sidewalk in _sidewalk_rects():
 		draw_texture_rect(SIDEWALK_TEXTURE, sidewalk, true)
+	_draw_decor()
 	draw_set_transform(Vector2.ZERO, 0.0)
 
 	# The road and sidewalks extend through the overscan past both soft bounds,
@@ -1216,6 +1222,34 @@ func _draw() -> void:
 		_draw_survivor_info_panel()
 	elif baseball_selected and baseball_spawn >= 0:
 		_draw_baseball_info_panel()
+
+func _draw_decor() -> void:
+	# Static scenery stays clear of the route and placement nodes for now.
+	var tree_positions: Array[Vector2] = [
+		Vector2(150, 145),
+		Vector2(460, 175),
+		Vector2(1180, 165),
+		Vector2(155, 985),
+		Vector2(455, 1130),
+		Vector2(1200, 1040)
+	]
+	for tree_position in tree_positions:
+		draw_texture_rect(
+			TREE_TEXTURE,
+			Rect2(tree_position - Vector2(48, 48), Vector2(96, 96)),
+			false
+		)
+
+	# Road-level details.
+	draw_texture_rect(MANHOLE_TEXTURE, Rect2(Vector2(330, 480), Vector2(48, 48)), false)
+	draw_texture_rect(MANHOLE_TEXTURE, Rect2(Vector2(872, 930), Vector2(48, 48)), false)
+	draw_texture_rect(OIL_SPILL_TEXTURE, Rect2(Vector2(505, 548), Vector2(58, 58)), false)
+	draw_texture_rect(OIL_SPILL_TEXTURE, Rect2(Vector2(952, 770), Vector2(54, 54)), false)
+
+	# Larger roadside clutter.
+	draw_texture_rect(CAR_TEXTURE, Rect2(Vector2(585, 900), Vector2(64, 118)), false)
+	draw_texture_rect(DEBRIS_TEXTURE, Rect2(Vector2(610, 735), Vector2(64, 64)), false)
+	draw_texture_rect(DEBRIS_TEXTURE, Rect2(Vector2(1125, 420), Vector2(56, 56)), false)
 
 func _draw_survivor_info_panel() -> void:
 	var panel_size := Vector2(260, 158)
