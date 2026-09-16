@@ -109,6 +109,8 @@ var map_drag_position := Vector2.ZERO
 var map_zoom := 1.0
 var active_touches := {}
 var pinch_distance := 0.0
+var game_paused := false
+var fast_forward := false
 
 var title_label: Label
 var health_label: Label
@@ -117,6 +119,8 @@ var version_label: Label
 var begin_button: Button
 var retry_button: Button
 var menu_button: Button
+var pause_button: Button
+var fast_forward_button: Button
 
 func _ready() -> void:
 	title_label = _make_label(38, Color.WHITE)
@@ -136,6 +140,10 @@ func _ready() -> void:
 	retry_button.pressed.connect(_start_game)
 	menu_button = _make_button("BACK TO MENU")
 	menu_button.pressed.connect(_show_menu)
+	pause_button = _make_button("PAUSE")
+	pause_button.pressed.connect(_toggle_pause)
+	fast_forward_button = _make_button("FF")
+	fast_forward_button.pressed.connect(_toggle_fast_forward)
 	_show_menu()
 	_layout_ui()
 	if DisplayServer.get_name() == "headless":
@@ -202,10 +210,28 @@ func _layout_ui() -> void:
 		retry_button.size = Vector2(145, 58)
 		menu_button.position = Vector2(center_x + 10, size.y * 0.58)
 		menu_button.size = Vector2(145, 58)
+	pause_button.position = Vector2(10, 8)
+	pause_button.size = Vector2(82, 34)
+	pause_button.add_theme_font_size_override("font_size", 14)
+	fast_forward_button.position = Vector2(100, 8)
+	fast_forward_button.size = Vector2(58, 34)
+	fast_forward_button.add_theme_font_size_override("font_size", 14)
+
+func _toggle_pause() -> void:
+	game_paused = not game_paused
+	pause_button.text = "PLAY" if game_paused else "PAUSE"
+	queue_redraw()
+
+func _toggle_fast_forward() -> void:
+	fast_forward = not fast_forward
+	fast_forward_button.text = "2X" if fast_forward else "FF"
 
 func _process(delta: float) -> void:
 	if screen != "playing":
 		return
+	if game_paused:
+		return
+	delta *= 2.0 if fast_forward else 1.0
 
 	if not map_dragging and active_touches.size() < 2:
 		var resting_offset := _clamped_map_offset(map_offset)
@@ -676,11 +702,17 @@ func _start_game() -> void:
 	map_offset = _centered_map_offset()
 	map_dragging = false
 	active_touches.clear()
+	game_paused = false
+	fast_forward = false
+	pause_button.text = "PAUSE"
+	fast_forward_button.text = "FF"
 	title_label.hide()
 	results_label.hide()
 	begin_button.hide()
 	retry_button.hide()
 	menu_button.hide()
+	pause_button.show()
+	fast_forward_button.show()
 	health_label.show()
 	queue_redraw()
 
@@ -693,6 +725,8 @@ func _show_menu() -> void:
 	begin_button.show()
 	retry_button.hide()
 	menu_button.hide()
+	pause_button.hide()
+	fast_forward_button.hide()
 	queue_redraw()
 
 func _show_results() -> void:
@@ -705,11 +739,16 @@ func _show_results() -> void:
 	begin_button.hide()
 	retry_button.show()
 	menu_button.show()
+	pause_button.hide()
+	fast_forward_button.hide()
 	queue_redraw()
 
 func _input(event: InputEvent) -> void:
 	if screen != "playing":
 		return
+	if event is InputEventScreenTouch or event is InputEventScreenDrag or event is InputEventMouseButton or event is InputEventMouseMotion:
+		if pause_button.get_global_rect().has_point(event.position) or fast_forward_button.get_global_rect().has_point(event.position):
+			return
 
 	if event is InputEventScreenTouch:
 		if event.pressed:
