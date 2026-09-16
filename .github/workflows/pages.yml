@@ -48,6 +48,14 @@ jobs:
           find /tmp/kenney -type f -path "*/Tiles/tile_215.png" -exec cp {} assets/kenney/manhole.png \;
           find /tmp/kenney -type f -path "*/Tiles/tile_292.png" -exec cp {} assets/kenney/debris.png \;
           find /tmp/kenney -type f -path "*/Tiles/tile_320.png" -exec cp {} assets/kenney/oil_spill.png \;
+          find /tmp/kenney -type f -path "*/Tiles/tile_09.png" -exec cp {} assets/kenney/house_tile_floor.png \;
+          find /tmp/kenney -type f -path "*/Tiles/tile_42.png" -exec cp {} assets/kenney/house_wood_floor.png \;
+          find /tmp/kenney -type f -path "*/Tiles/tile_129.png" -exec cp {} assets/kenney/house_crate.png \;
+          find /tmp/kenney -type f -path "*/Tiles/tile_134.png" -exec cp {} assets/kenney/house_plant.png \;
+          find /tmp/kenney -type f -path "*/Tiles/tile_243.png" -exec cp {} assets/kenney/house_sofa.png \;
+          find /tmp/kenney -type f -path "*/Tiles/tile_267.png" -exec cp {} assets/kenney/house_table.png \;
+          find /tmp/kenney -type f -path "*/Tiles/tile_270.png" -exec cp {} assets/kenney/house_fridge.png \;
+          find /tmp/kenney -type f -path "*/Tiles/tile_296.png" -exec cp {} assets/kenney/house_stove.png \;
           curl -L "https://raw.githubusercontent.com/eturner58/game-assets/main/kenney/2D%20assets/Racing%20Pack/PNG/Cars/car_black_1.png" -o assets/kenney/car.png
           test -f assets/kenney/survivor.png
           test -f assets/kenney/baseball.png
@@ -62,6 +70,14 @@ jobs:
           test -f assets/kenney/debris.png
           test -f assets/kenney/oil_spill.png
           test -f assets/kenney/car.png
+          test -f assets/kenney/house_tile_floor.png
+          test -f assets/kenney/house_wood_floor.png
+          test -f assets/kenney/house_crate.png
+          test -f assets/kenney/house_plant.png
+          test -f assets/kenney/house_sofa.png
+          test -f assets/kenney/house_table.png
+          test -f assets/kenney/house_fridge.png
+          test -f assets/kenney/house_stove.png
       - name: Import Godot project
         run: godot --headless --editor --path . --quit
       - name: Smoke test active gameplay
