@@ -950,7 +950,8 @@ func _field_rect() -> Rect2:
 	return Rect2(Vector2.ZERO, _map_size())
 
 func _road_center() -> Vector2:
-	return Vector2(_map_size().x * 0.68, _map_size().y * 0.38)
+	# Keep the bend aligned to whole tiles so sidewalk pieces meet cleanly.
+	return Vector2(TILE_SIZE * 14.0, TILE_SIZE * 8.0)
 
 func _road_turn() -> Vector2:
 	return _road_center()
@@ -985,7 +986,9 @@ func _sidewalk_rects() -> Array[Rect2]:
 		Rect2(horizontal.position.x, horizontal.position.y - sidewalk_width, horizontal.size.x, sidewalk_width),
 		Rect2(horizontal.position.x, horizontal.end.y, turn.x - half_width - horizontal.position.x, sidewalk_width),
 		Rect2(vertical.position.x - sidewalk_width, turn.y + half_width, sidewalk_width, vertical.end.y - turn.y - half_width),
-		Rect2(vertical.end.x, vertical.position.y, sidewalk_width, vertical.size.y)
+		Rect2(vertical.end.x, vertical.position.y, sidewalk_width, vertical.size.y),
+		# Fill the outside elbow where the top and right sidewalks meet.
+		Rect2(vertical.end.x, horizontal.position.y - sidewalk_width, sidewalk_width, sidewalk_width)
 	]
 
 func _survivor_entry_position() -> Vector2:
@@ -1040,9 +1043,10 @@ func _draw() -> void:
 		Vector2(vertical_road.position.x, road.end.y),
 		Vector2(vertical_road.size.x, vertical_road.end.y - road.end.y)
 	)
-	draw_texture_rect_region(ROAD_TEXTURE, approach_road, Rect2(8, 0, 48, 64))
-	draw_texture_rect_region(ROAD_TEXTURE, corner_road, Rect2(8, 0, 48, 64))
-	draw_texture_rect_region(ROAD_TEXTURE, exit_road, Rect2(8, 0, 48, 64))
+	var asphalt_color := Color("#4b4b4b")
+	draw_rect(approach_road, asphalt_color)
+	draw_rect(corner_road, asphalt_color)
+	draw_rect(exit_road, asphalt_color)
 	for sidewalk in _sidewalk_rects():
 		draw_texture_rect(SIDEWALK_TEXTURE, sidewalk, true)
 	draw_set_transform(Vector2.ZERO, 0.0)
