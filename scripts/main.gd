@@ -37,12 +37,16 @@ const BASEBALL_SPEED := 95.0
 const BASEBALL_RECHARGE_SPEED := 42.0
 const BASEBALL_ATTACK_RATE := 1.5
 const BASEBALL_DAMAGE := 0.5
+const BASEBALL_DAMAGE_PER_LEVEL := 0.15
 const BASEBALL_KNOCKBACK_SPEED := 420.0
 const ZOMBIE_KNOCKBACK_DECELERATION := 1225.0
 const BASEBALL_AOE_METERS := 0.9
 const BASEBALL_SWING_DURATION := 0.28
 const ZOMBIE_MAX_HEALTH := 3
 const FIRE_RATE := 0.65
+const COP_ACCURACY := 0.78
+const COP_MAX_SPREAD_DEGREES := 14.0
+const ZOMBIE_HIT_RADIUS := 23.0
 const MAGAZINE_SIZE := 10
 const RELOAD_TIME := 1.8
 const EARLY_RELOAD_AT := 5
@@ -560,7 +564,7 @@ func _swing_bat(target: Dictionary) -> void:
 		var knockback_direction := baseball_position.direction_to(target_position)
 		zombie.knockback_velocity = knockback_direction * BASEBALL_KNOCKBACK_SPEED
 		zombie.movement_factor = 0.02
-		zombie.hp -= BASEBALL_DAMAGE
+		zombie.hp -= _baseball_damage()
 		for i in 4:
 			var direction := Vector2.RIGHT.rotated(randf_range(0.0, TAU))
 			blood_particles.append({
@@ -583,6 +587,9 @@ func _swing_bat(target: Dictionary) -> void:
 			if randf() <= GUNSHOT_RETARGET_CHANCE:
 				zombie.target_id = "baseball"
 
+func _baseball_damage() -> float:
+	return BASEBALL_DAMAGE + (baseball_level - 1) * BASEBALL_DAMAGE_PER_LEVEL
+
 func _closest_zombie() -> Dictionary:
 	var closest: Dictionary = {}
 	var closest_distance := INF
@@ -602,42 +609,65 @@ func _start_reload() -> void:
 func _shoot(target: Dictionary) -> void:
 	if target.is_empty() or not zombies.has(target) or is_reloading or ammo <= 0:
 		return
-	var target_position := _zombie_position(target)
-	shots.append({"start":survivor_position, "end":target_position, "life":0.12})
-	ammo -= 1
-	for i in 7:
-		var direction := Vector2.RIGHT.rotated(randf_range(0.0, TAU))
-		blood_particles.append({
-			"position": target_position + direction * randf_range(2.0, 8.0),
-			"velocity": direction * randf_range(20.0, 65.0),
-			"life": BLOOD_PARTICLE_LIFE * randf_range(0.65, 1.0)
-		})
-	# The zombie that was hit acquires the shooter if it was still wandering.
-	if String(target.target_id) == "":
-		target.target_id = "cop"
 
-	# Other untargeted zombies may hear the shot. Hearing is local and
-	# intentionally unreliable, keeping the whole swarm from turning at once.
+	var intended_direction := survivor_position.direction_to(_zombie_position(target))
+	var max_spread := deg_to_rad(COP_MAX_SPREAD_DEGREES) * (1.0 - COP_ACCURACY)
+	var shot_direction := intended_direction.rotated(randf_range(-max_spread, max_spread))
+	var ray_length := _survivor_range()
+	var ray_end := survivor_position + shot_direction * ray_length
+	var hit_zombie: Dictionary = {}
+	var hit_distance := INF
+
+	# Find the first zombie whose body intersects the finite shot ray.
+	for zombie in zombies:
+		var offset := _zombie_position(zombie) - survivor_position
+		var distance_along_ray := offset.dot(shot_direction)
+		if distance_along_ray < 0.0 or distance_along_ray > ray_length:
+			continue
+		var closest_point := survivor_position + shot_direction * distance_along_ray
+		if closest_point.distance_to(_zombie_position(zombie)) <= ZOMBIE_HIT_RADIUS:
+			if distance_along_ray < hit_distance:
+				hit_distance = distance_along_ray
+				hit_zombie = zombie
+
+	var impact_position := ray_end
+	if not hit_zombie.is_empty():
+		impact_position = survivor_position + shot_direction * hit_distance
+	shots.append({"start":survivor_position, "end":impact_position, "life":0.12})
+	ammo -= 1
+	fire_cooldown = FIRE_RATE
+
+	if not hit_zombie.is_empty():
+		var zombie_position := _zombie_position(hit_zombie)
+		for i in 7:
+			var direction := Vector2.RIGHT.rotated(randf_range(0.0, TAU))
+			blood_particles.append({
+				"position": zombie_position + direction * randf_range(2.0, 8.0),
+				"velocity": direction * randf_range(20.0, 65.0),
+				"life": BLOOD_PARTICLE_LIFE * randf_range(0.65, 1.0)
+			})
+		if String(hit_zombie.target_id) == "":
+			hit_zombie.target_id = "cop"
+		var knockback_direction := survivor_position.direction_to(zombie_position)
+		var knocked_position := zombie_position + knockback_direction * ZOMBIE_HIT_KNOCKBACK
+		hit_zombie.x = knocked_position.x / _map_size().x
+		hit_zombie.y = knocked_position.y
+		hit_zombie.movement_factor = 0.08
+		hit_zombie.hp -= 1
+		if hit_zombie.hp <= 0:
+			zombies.erase(hit_zombie)
+			zombies_killed += 1
+			cop_kills += 1
+			_award_cop_xp()
+
+	# Nearby untargeted zombies can react to the sound even when the shot misses.
 	var hearing_range := GUNSHOT_HEARING_RANGE_METERS * TILE_SIZE
 	for zombie in zombies:
-		if zombie == target or String(zombie.target_id) != "":
+		if zombie == hit_zombie or String(zombie.target_id) != "":
 			continue
 		if _zombie_position(zombie).distance_to(survivor_position) <= hearing_range:
 			if randf() <= GUNSHOT_RETARGET_CHANCE:
 				zombie.target_id = "cop"
-
-	var knockback_direction := survivor_position.direction_to(target_position)
-	var knocked_position := target_position + knockback_direction * ZOMBIE_HIT_KNOCKBACK
-	target.x = knocked_position.x / _map_size().x
-	target.y = knocked_position.y
-	target.movement_factor = 0.08
-	fire_cooldown = FIRE_RATE
-	target.hp -= 1
-	if target.hp <= 0:
-		zombies.erase(target)
-		zombies_killed += 1
-		cop_kills += 1
-		_award_cop_xp()
 
 func _award_cop_xp() -> void:
 	cop_xp += 1
@@ -1131,7 +1161,7 @@ func _draw() -> void:
 			)
 			draw_circle(destination_screen, 11.0, Color(0.20, 0.65, 1.0, 0.22))
 			draw_arc(destination_screen, 11.0, 0.0, TAU, 24, arrow_color, 2.0)
-		if survivor_alive:
+		if survivor_alive and survivor_selected:
 			draw_circle(survivor_screen, _survivor_range() * map_zoom, Color(0.45, 0.72, 0.48, 0.08))
 			draw_arc(survivor_screen, _survivor_range() * map_zoom, 0, TAU, 48, Color(0.45, 0.72, 0.48, 0.25), 2)
 		draw_set_transform(survivor_screen, survivor_aim_angle, Vector2(map_zoom, map_zoom))
@@ -1272,7 +1302,7 @@ func _draw_survivor_info_panel() -> void:
 		Color.WHITE
 	)
 	var status := "RELOADING" if is_reloading else "%d / %d" % [ammo, MAGAZINE_SIZE]
-	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 52), "POLICE OFFICER", HORIZONTAL_ALIGNMENT_LEFT, 145, 14, Color("#83c7ff"))
+	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 52), "POLICE • ACCURACY %d%%" % int(COP_ACCURACY * 100.0), HORIZONTAL_ALIGNMENT_LEFT, 145, 14, Color("#83c7ff"))
 	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 74), "LEVEL   %d  XP %d/%d" % [cop_level, cop_xp, cop_xp_to_next], HORIZONTAL_ALIGNMENT_LEFT, 150, 15, Color.WHITE)
 	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 96), "HEALTH  %d / %d" % [survivor_health, survivor_max_health], HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
 	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 118), "AMMO    %s" % status, HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
@@ -1291,5 +1321,5 @@ func _draw_baseball_info_panel() -> void:
 	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 52), "BASEBALL PLAYER", HORIZONTAL_ALIGNMENT_LEFT, 145, 14, Color("#f0b96f"))
 	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 74), "LEVEL   %d  XP %d/%d" % [baseball_level, baseball_xp, baseball_xp_to_next], HORIZONTAL_ALIGNMENT_LEFT, 150, 15, Color.WHITE)
 	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 96), "HEALTH  %d / %d" % [baseball_health, baseball_max_health], HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
-	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 118), "WEAPON  BAT", HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 118), "BAT DMG %.2f" % _baseball_damage(), HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
 	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 140), "KILLS   %d" % baseball_kills, HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
