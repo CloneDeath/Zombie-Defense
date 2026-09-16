@@ -33,7 +33,7 @@ const BASEBALL_ATTACK_RATE := 1.5
 const BASEBALL_DAMAGE := 0.5
 const BASEBALL_KNOCKBACK_SPEED := 420.0
 const ZOMBIE_KNOCKBACK_DECELERATION := 1225.0
-const BASEBALL_AOE_METERS := 1.15
+const BASEBALL_AOE_METERS := 0.9
 const BASEBALL_SWING_DURATION := 0.28
 const ZOMBIE_MAX_HEALTH := 3
 const FIRE_RATE := 0.65
@@ -267,6 +267,8 @@ func _spawn_zombie() -> void:
 		"movement_factor": 1.0,
 		"knockback_velocity": Vector2.ZERO,
 		"target_id": "",
+		"swarm_angle": randf_range(0.0, TAU),
+		"swarm_radius": randf_range(20.0, 30.0),
 		"attack_cooldown": 0.0,
 		"aim_angle": 0.0
 	})
@@ -295,11 +297,13 @@ func _update_zombies(delta: float) -> void:
 		if target_id != "":
 			var zombie_position := _zombie_position(zombie)
 			var target_position := _survivor_target_position(target_id)
+			var swarm_offset := Vector2.RIGHT.rotated(float(zombie.swarm_angle)) * float(zombie.swarm_radius)
+			var swarm_position: Vector2 = target_position + swarm_offset
 			var distance := zombie_position.distance_to(target_position)
 			var desired_angle := zombie_position.angle_to_point(target_position)
 			zombie.aim_angle = rotate_toward(zombie.aim_angle, desired_angle, ZOMBIE_TURN_SPEED * delta)
 			if distance > ZOMBIE_ATTACK_RANGE:
-				var direction := zombie_position.direction_to(target_position)
+				var direction := zombie_position.direction_to(swarm_position)
 				var speed: float = ZOMBIE_CHASE_SPEED * zombie.speed_multiplier * zombie.movement_factor
 				zombie.x += direction.x * speed * delta / _map_size().x
 				zombie.y += direction.y * speed * delta
