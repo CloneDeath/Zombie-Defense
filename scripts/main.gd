@@ -1277,7 +1277,7 @@ func _draw_decor() -> void:
 	draw_texture_rect(OIL_SPILL_TEXTURE, Rect2(Vector2(952, 770), Vector2(54, 54)), false)
 
 	# Larger roadside clutter.
-	draw_texture_rect(CAR_TEXTURE, Rect2(Vector2(585, 900), Vector2(64, 118)), false)
+	draw_texture_rect(CAR_TEXTURE, Rect2(Vector2(755, 1010), Vector2(96, 177)), false)
 	draw_texture_rect(DEBRIS_TEXTURE, Rect2(Vector2(610, 735), Vector2(64, 64)), false)
 	draw_texture_rect(DEBRIS_TEXTURE, Rect2(Vector2(1125, 420), Vector2(56, 56)), false)
 
