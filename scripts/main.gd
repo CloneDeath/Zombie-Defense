@@ -1250,13 +1250,7 @@ func _spawn_point_at(position: Vector2) -> int:
 	position = _screen_to_map(position)
 	var zones := _deployment_zones()
 	for i in zones.size():
-		var zone := zones[i]
-		var center := zone.get_center()
-		var normalized := Vector2(
-			(position.x - center.x) / (zone.size.x * 0.5),
-			(position.y - center.y) / (zone.size.y * 0.5)
-		)
-		if normalized.length_squared() <= 1.0:
+		if zones[i].has_point(position):
 			return i
 	return -1
 
@@ -1342,36 +1336,29 @@ func _spawn_points() -> Array[Vector2]:
 
 func _deployment_zones() -> Array[Rect2]:
 	return [
-		Rect2(Vector2(105, 105), Vector2(280, 175)),
-		Rect2(Vector2(405, 80), Vector2(350, 275)),
-		Rect2(Vector2(850, 85), Vector2(355, 285)),
-		Rect2(Vector2(90, 605), Vector2(285, 270)),
-		Rect2(Vector2(390, 590), Vector2(370, 330)),
-		Rect2(Vector2(845, 665), Vector2(360, 285))
+		Rect2(Vector2(64, 64), Vector2(320, 512)),
+		Rect2(Vector2(384, 64), Vector2(448, 512)),
+		Rect2(Vector2(832, 64), Vector2(384, 512)),
+		Rect2(Vector2(64, 576), Vector2(320, 640)),
+		Rect2(Vector2(384, 576), Vector2(448, 640)),
+		Rect2(Vector2(832, 576), Vector2(384, 640))
 	]
 
 func _zone_home(index: int, unit: String) -> Vector2:
-	var zone := _deployment_zones()[index]
-	# Zone 5 surrounds the abandoned car; split the home positions around it
-	# so survivors naturally use opposite sides instead of targeting its body.
-	if index == 4:
-		return Vector2(500, 825) if unit == "cop" else Vector2(710, 820)
-	var offset := Vector2(-zone.size.x * 0.13, zone.size.y * 0.08)
-	if unit == "baseball":
-		offset = Vector2(zone.size.x * 0.13, -zone.size.y * 0.08)
-	return zone.get_center() + offset
+	var cop_homes: Array[Vector2] = [
+		Vector2(165, 135), Vector2(500, 130), Vector2(910, 410),
+		Vector2(155, 690), Vector2(500, 825), Vector2(920, 780)
+	]
+	var baseball_homes: Array[Vector2] = [
+		Vector2(315, 155), Vector2(720, 150), Vector2(1115, 420),
+		Vector2(315, 795), Vector2(710, 820), Vector2(1110, 1010)
+	]
+	return cop_homes[index] if unit == "cop" else baseball_homes[index]
 
 func _point_in_deployment_zone(point: Vector2, index: int, padding: float = 0.0) -> bool:
 	if index < 0:
 		return false
-	var zone := _deployment_zones()[index]
-	var center := zone.get_center()
-	var radius := zone.size * 0.5 + Vector2.ONE * padding
-	var normalized := Vector2(
-		(point.x - center.x) / radius.x,
-		(point.y - center.y) / radius.y
-	)
-	return normalized.length_squared() <= 1.0
+	return _deployment_zones()[index].grow(padding).has_point(point)
 
 func _survivor_card_rect() -> Rect2:
 	return Rect2(size.x * 0.5 - 112, size.y - 105, 104, 92)
@@ -1460,9 +1447,9 @@ func _draw() -> void:
 	if baseball_spawn >= 0 and not baseball_evacuated:
 		var baseball_screen := _map_to_screen(baseball_position)
 		if baseball_alive and baseball_selected:
-			var home_screen := _map_to_screen(baseball_target)
-			draw_circle(home_screen, BASEBALL_ROAM_METERS * TILE_SIZE * map_zoom, Color(0.25, 0.55, 1.0, 0.06))
-			draw_arc(home_screen, BASEBALL_ROAM_METERS * TILE_SIZE * map_zoom, 0, TAU, 64, Color(0.25, 0.55, 1.0, 0.22), 2)
+			var melee_range := BASEBALL_MELEE_METERS * TILE_SIZE * map_zoom
+			draw_circle(baseball_screen, melee_range, Color(0.25, 0.55, 1.0, 0.06))
+			draw_arc(baseball_screen, melee_range, 0, TAU, 32, Color(0.25, 0.55, 1.0, 0.22), 2)
 		draw_set_transform(baseball_screen, baseball_aim_angle, Vector2(map_zoom, map_zoom))
 		var baseball_color := Color.WHITE if baseball_alive else Color(0.35, 0.35, 0.35, 1.0)
 		draw_texture_rect(BASEBALL_TEXTURE, Rect2(Vector2(-34, -30), Vector2(68, 60)), false, baseball_color)
@@ -1539,14 +1526,12 @@ func _draw() -> void:
 		_draw_baseball_info_panel()
 
 func _zone_screen_polygon(zone: Rect2) -> PackedVector2Array:
-	var polygon := PackedVector2Array()
-	var center := zone.get_center()
-	var radius := zone.size * 0.5
-	for i in 40:
-		var angle := TAU * float(i) / 40.0
-		var map_point := center + Vector2(cos(angle) * radius.x, sin(angle) * radius.y)
-		polygon.append(_map_to_screen(map_point))
-	return polygon
+	return PackedVector2Array([
+		_map_to_screen(zone.position),
+		_map_to_screen(Vector2(zone.end.x, zone.position.y)),
+		_map_to_screen(zone.end),
+		_map_to_screen(Vector2(zone.position.x, zone.end.y))
+	])
 
 func _draw_map_preview() -> void:
 	var preview_width := minf(440.0, size.x - 40.0)
@@ -1570,16 +1555,19 @@ func _draw_map_preview() -> void:
 	draw_rect(house, Color("#ef6c16"))
 	draw_rect(house.grow(-6.0), Color("#c98c4a"))
 	draw_line(Vector2(house.position.x + 42.0, house.position.y + 6.0), Vector2(house.position.x + 42.0, house.end.y - 6.0), Color("#454545"), 4.0)
-	for point in [
-		Vector2(preview.position.x + preview.size.x * 0.18, preview.position.y + preview.size.y * 0.20),
-		Vector2(preview.position.x + preview.size.x * 0.45, preview.position.y + preview.size.y * 0.21),
-		Vector2(preview.position.x + preview.size.x * 0.78, preview.position.y + preview.size.y * 0.22),
-		Vector2(preview.position.x + preview.size.x * 0.18, preview.position.y + preview.size.y * 0.72),
-		Vector2(preview.position.x + preview.size.x * 0.45, preview.position.y + preview.size.y * 0.70),
-		Vector2(preview.position.x + preview.size.x * 0.79, preview.position.y + preview.size.y * 0.72)
-	]:
-		draw_circle(point, 9.0, Color(0.85, 0.73, 0.35, 0.55))
-		draw_arc(point, 9.0, 0.0, TAU, 20, Color("#d9ba58"), 2.0)
+	var column_edges := [0.0, 0.278, 0.667, 1.0]
+	var row_edges := [0.0, 0.444, 1.0]
+	for row in 2:
+		for column in 3:
+			var zone_preview := Rect2(
+				preview.position + Vector2(preview.size.x * column_edges[column], preview.size.y * row_edges[row]),
+				Vector2(
+					preview.size.x * (column_edges[column + 1] - column_edges[column]),
+					preview.size.y * (row_edges[row + 1] - row_edges[row])
+				)
+			)
+			draw_rect(zone_preview, Color(0.85, 0.73, 0.35, 0.08))
+			draw_rect(zone_preview, Color("#d9ba58"), false, 1.5)
 
 func _draw_decor() -> void:
 	_draw_house_interior()
