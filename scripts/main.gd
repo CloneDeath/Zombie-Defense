@@ -757,6 +757,9 @@ func _random_patrol_point(zone: Rect2) -> Vector2:
 func _car_rect() -> Rect2:
 	return Rect2(Vector2(555, 590), Vector2(96, 177))
 
+func _house_rect() -> Rect2:
+	return Rect2(Vector2(875, 42), Vector2(330, 250))
+
 func _survivor_travel_speed(position: Vector2, base_speed: float) -> float:
 	# Only fast-travel while fully off-screen. Using the viewport instead of the
 	# map boundary keeps zooming and panning from exposing a boosted survivor.
@@ -784,9 +787,32 @@ func _segment_intersects_rect(from: Vector2, to: Vector2, rect: Rect2) -> bool:
 	)
 
 func _move_around_car(current: Vector2, target: Vector2, distance: float) -> Vector2:
-	var obstacle := _car_rect().grow(30.0)
-	# Unit separation can occasionally shove a survivor just inside the car's
-	# clearance box. Recover to the nearest edge before calculating waypoints.
+	# Route around whichever solid obstacle is encountered first. Keeping this
+	# in the shared movement helper makes both survivors respect the house.
+	var obstacles: Array[Rect2] = [
+		_car_rect().grow(30.0),
+		_house_rect().grow(24.0)
+	]
+	var obstacle := Rect2()
+	var obstacle_found := false
+	var nearest_obstacle_distance := INF
+	for candidate in obstacles:
+		if candidate.has_point(current):
+			obstacle = candidate
+			obstacle_found = true
+			break
+		if not _segment_intersects_rect(current, target, candidate):
+			continue
+		var candidate_distance := current.distance_to(candidate.get_center())
+		if candidate_distance < nearest_obstacle_distance:
+			nearest_obstacle_distance = candidate_distance
+			obstacle = candidate
+			obstacle_found = true
+	if not obstacle_found:
+		return current.move_toward(target, distance)
+
+	# Unit separation can occasionally shove a survivor just inside an
+	# obstacle's clearance box. Recover before calculating waypoints.
 	if obstacle.has_point(current):
 		var left_distance := current.x - obstacle.position.x
 		var right_distance := obstacle.end.x - current.x
@@ -1715,7 +1741,7 @@ func _draw_decor() -> void:
 	var tree_positions: Array[Vector2] = [
 		Vector2(120, 80),
 		Vector2(330, 90),
-		Vector2(830, 105),
+		Vector2(1160, 380),
 		Vector2(1210, 170),
 		Vector2(125, 680),
 		Vector2(285, 790),
@@ -1738,7 +1764,7 @@ func _draw_decor() -> void:
 func _draw_house_interior() -> void:
 	# Roofless top-down house, matching the construction style of Kenney's
 	# preview: visible floors, room divisions, furniture and an open entry.
-	var house := Rect2(Vector2(875, 42), Vector2(330, 250))
+	var house := _house_rect()
 	var inside := house.grow(-14.0)
 	var kitchen := Rect2(inside.position, Vector2(inside.size.x, 88.0))
 	var living := Rect2(inside.position + Vector2(0.0, 88.0), Vector2(inside.size.x, inside.size.y - 88.0))
