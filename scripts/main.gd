@@ -102,6 +102,8 @@ var baseball_position := Vector2.ZERO
 var baseball_target := Vector2.ZERO
 var baseball_is_walking := false
 var baseball_zone_move := false
+var baseball_patrol_target := Vector2.ZERO
+var baseball_patrol_timer := 0.0
 var baseball_retreating := false
 var baseball_evacuated := false
 var baseball_aim_angle := PI
@@ -661,11 +663,27 @@ func _update_baseball_survivor(delta: float) -> void:
 			_clear_zombie_target("baseball")
 		return
 
-	baseball_target = _zone_home(baseball_spawn, "baseball")
-	if baseball_zone_move and baseball_position.distance_to(baseball_target) <= 8.0:
-		baseball_zone_move = false
 	baseball_attack_cooldown -= delta
 	baseball_swing_time = maxf(0.0, baseball_swing_time - delta)
+	var zone := _deployment_zones()[baseball_spawn]
+	var safe_zone := zone.grow(-SURVIVOR_COLLISION_RADIUS)
+
+	# While transferring zones, keep advancing and bash anything physically
+	# blocking the route. The move arrow disappears at the zone boundary.
+	if not zone.has_point(baseball_position):
+		baseball_target = _zone_home(baseball_spawn, "baseball")
+		baseball_zone_move = true
+		var blocking_zombie := _closest_zombie_to_baseball(BASEBALL_MELEE_METERS * TILE_SIZE)
+		if not blocking_zombie.is_empty() and baseball_attack_cooldown <= 0.0:
+			_swing_bat(blocking_zombie)
+		var transfer_angle := baseball_position.angle_to_point(baseball_target)
+		baseball_aim_angle = rotate_toward(baseball_aim_angle, transfer_angle, SURVIVOR_TURN_SPEED * delta)
+		baseball_is_walking = true
+		var transfer_speed := _survivor_travel_speed(baseball_position, BASEBALL_SPEED)
+		baseball_position = _move_around_car(baseball_position, baseball_target, transfer_speed * delta)
+		return
+
+	baseball_zone_move = false
 	var target := _closest_zombie_in_baseball_roam()
 	if not target.is_empty():
 		var target_position := _zombie_position(target)
@@ -690,15 +708,51 @@ func _update_baseball_survivor(delta: float) -> void:
 			var chase_speed := _survivor_travel_speed(baseball_position, BASEBALL_SPEED)
 			baseball_position = _move_around_car(baseball_position, target_position, chase_speed * delta)
 	else:
-		var distance_home := baseball_position.distance_to(baseball_target)
-		if distance_home > 1.0:
+		var nearest_zombie := _closest_zombie_to_baseball()
+		if not nearest_zombie.is_empty():
+			baseball_target = _zone_edge_toward(_zombie_position(nearest_zombie), safe_zone)
+			baseball_patrol_timer = 0.0
+		else:
+			baseball_patrol_timer -= delta
+			if baseball_patrol_target == Vector2.ZERO or baseball_position.distance_to(baseball_patrol_target) <= 8.0 or baseball_patrol_timer <= 0.0:
+				baseball_patrol_target = _random_patrol_point(safe_zone)
+				baseball_patrol_timer = randf_range(2.5, 5.0)
+			baseball_target = baseball_patrol_target
+
+		if baseball_position.distance_to(baseball_target) > 8.0:
 			baseball_is_walking = true
-			var home_angle := baseball_position.angle_to_point(baseball_target)
-			baseball_aim_angle = rotate_toward(baseball_aim_angle, home_angle, SURVIVOR_TURN_SPEED * delta)
-			var travel_speed := _survivor_travel_speed(baseball_position, BASEBALL_SPEED)
-			baseball_position = _move_around_car(baseball_position, baseball_target, travel_speed * delta)
+			var patrol_angle := baseball_position.angle_to_point(baseball_target)
+			baseball_aim_angle = rotate_toward(baseball_aim_angle, patrol_angle, SURVIVOR_TURN_SPEED * delta)
+			baseball_position = _move_around_car(baseball_position, baseball_target, BASEBALL_RECHARGE_SPEED * delta)
 		else:
 			baseball_is_walking = false
+
+func _closest_zombie_to_baseball(max_distance: float = INF) -> Dictionary:
+	var closest: Dictionary = {}
+	var closest_distance := max_distance
+	for zombie in zombies:
+		var distance := baseball_position.distance_to(_zombie_position(zombie))
+		if distance <= closest_distance:
+			closest = zombie
+			closest_distance = distance
+	return closest
+
+func _zone_edge_toward(point: Vector2, zone: Rect2) -> Vector2:
+	return Vector2(
+		clampf(point.x, zone.position.x, zone.end.x),
+		clampf(point.y, zone.position.y, zone.end.y)
+	)
+
+func _random_patrol_point(zone: Rect2) -> Vector2:
+	var car_clearance := _car_rect().grow(30.0)
+	for attempt in 8:
+		var point := Vector2(
+			randf_range(zone.position.x, zone.end.x),
+			randf_range(zone.position.y, zone.end.y)
+		)
+		if not car_clearance.has_point(point):
+			return point
+	return zone.position + Vector2(36.0, 36.0)
 
 func _car_rect() -> Rect2:
 	return Rect2(Vector2(555, 590), Vector2(96, 177))
@@ -761,7 +815,7 @@ func _closest_zombie_in_baseball_roam() -> Dictionary:
 	var closest_distance := INF
 	for zombie in zombies:
 		var zombie_position := _zombie_position(zombie)
-		if not _point_in_deployment_zone(zombie_position, baseball_spawn, BASEBALL_MELEE_METERS * TILE_SIZE):
+		if not _point_in_deployment_zone(zombie_position, baseball_spawn):
 			continue
 		var distance := baseball_position.distance_to(zombie_position)
 		if distance < closest_distance:
@@ -940,6 +994,8 @@ func _start_game() -> void:
 	baseball_target = Vector2.ZERO
 	baseball_is_walking = false
 	baseball_zone_move = false
+	baseball_patrol_target = Vector2.ZERO
+	baseball_patrol_timer = 0.0
 	baseball_retreating = false
 	baseball_evacuated = false
 	baseball_aim_angle = PI
@@ -1239,6 +1295,8 @@ func _set_selected_survivor_destination(index: int) -> void:
 			baseball_spawn = index
 			baseball_target = _zone_home(index, "baseball")
 			baseball_zone_move = true
+			baseball_patrol_target = Vector2.ZERO
+			baseball_patrol_timer = 0.0
 			baseball_selected = false
 	dragging_survivor = false
 	dragging_unit = ""
@@ -1261,6 +1319,8 @@ func _place_baseball_survivor(index: int) -> void:
 	baseball_aim_angle = PI
 	baseball_is_walking = true
 	baseball_zone_move = true
+	baseball_patrol_target = Vector2.ZERO
+	baseball_patrol_timer = 0.0
 	baseball_selected = false
 	dragging_survivor = false
 	baseball_attack_cooldown = 0.0
@@ -1479,10 +1539,6 @@ func _draw() -> void:
 			)
 			draw_circle(destination_screen, 11.0, Color(0.20, 0.65, 1.0, 0.22))
 			draw_arc(destination_screen, 11.0, 0.0, TAU, 24, arrow_color, 2.0)
-		if baseball_alive and baseball_selected:
-			var melee_range := BASEBALL_MELEE_METERS * TILE_SIZE * map_zoom
-			draw_circle(baseball_screen, melee_range, Color(0.25, 0.55, 1.0, 0.06))
-			draw_arc(baseball_screen, melee_range, 0, TAU, 32, Color(0.25, 0.55, 1.0, 0.22), 2)
 		draw_set_transform(baseball_screen, baseball_aim_angle, Vector2(map_zoom, map_zoom))
 		var baseball_color := Color.WHITE if baseball_alive else Color(0.35, 0.35, 0.35, 1.0)
 		draw_texture_rect(BASEBALL_TEXTURE, Rect2(Vector2(-34, -30), Vector2(68, 60)), false, baseball_color)
@@ -1547,7 +1603,7 @@ func _draw() -> void:
 		draw_rect(card, card_color)
 		draw_rect(card, Color("#9fb9d2"), false, 2)
 		draw_texture_rect(BASEBALL_TEXTURE, Rect2(card.position + Vector2(23, 5), Vector2(58, 49)), false)
-		draw_string(ThemeDB.fallback_font, card.position + Vector2(7, 78), "BATTER • 7m", HORIZONTAL_ALIGNMENT_CENTER, 90, 13, Color.WHITE)
+		draw_string(ThemeDB.fallback_font, card.position + Vector2(7, 78), "BATTER • ZONE", HORIZONTAL_ALIGNMENT_CENTER, 90, 13, Color.WHITE)
 
 	if dragging_survivor:
 		var drag_texture: Texture2D = SURVIVOR_TEXTURE if dragging_unit == "cop" else BASEBALL_TEXTURE
