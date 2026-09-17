@@ -1165,6 +1165,7 @@ func _input(event: InputEvent) -> void:
 		if event.pressed:
 			active_touches[event.index] = event.position
 			if active_touches.size() == 1:
+				pointer_down_position = event.position
 				map_dragging = not _handle_pointer_down(event.position)
 				map_drag_position = event.position
 			elif active_touches.size() == 2:
@@ -1173,8 +1174,11 @@ func _input(event: InputEvent) -> void:
 				dragging_unit = ""
 				pinch_distance = _touch_distance()
 		else:
-			if active_touches.size() == 1 and dragging_survivor:
-				_handle_pointer_up(event.position)
+			if active_touches.size() == 1:
+				if dragging_survivor:
+					_handle_pointer_up(event.position)
+				elif map_dragging:
+					_handle_map_pointer_up(event.position)
 			active_touches.erase(event.index)
 			if active_touches.size() < 2:
 				pinch_distance = 0.0
@@ -1202,11 +1206,14 @@ func _input(event: InputEvent) -> void:
 			_zoom_at(event.position, map_zoom / 1.12)
 		elif event.button_index == MOUSE_BUTTON_LEFT:
 			if event.pressed:
+				pointer_down_position = event.position
 				map_dragging = not _handle_pointer_down(event.position)
 				map_drag_position = event.position
 			else:
 				if dragging_survivor:
 					_handle_pointer_up(event.position)
+				elif map_dragging:
+					_handle_map_pointer_up(event.position)
 				map_dragging = false
 	elif event is InputEventMouseMotion:
 		if dragging_survivor:
@@ -1329,17 +1336,23 @@ func _handle_pointer_down(position: Vector2) -> bool:
 		pointer_down_position = position
 		queue_redraw()
 		return true
-	elif survivor_selected or baseball_selected:
-		var index := _spawn_point_at(position)
-		if index >= 0:
-			_set_selected_survivor_destination(index)
-			return true
-		# Empty map space clears selection and then behaves like a normal map drag.
+	# Map taps are resolved on release. This lets a selected survivor coexist
+	# with a pan gesture without assigning the zone touched at drag start.
+	return false
+
+func _handle_map_pointer_up(position: Vector2) -> void:
+	if pointer_down_position.distance_to(position) > 10.0:
+		return
+	if not survivor_selected and not baseball_selected:
+		return
+	var index := _spawn_point_at(position)
+	if index >= 0:
+		_set_selected_survivor_destination(index)
+	else:
 		survivor_selected = false
 		baseball_selected = false
 		dragging_unit = ""
 		queue_redraw()
-	return false
 
 func _handle_pointer_up(position: Vector2) -> void:
 	if not dragging_survivor:
