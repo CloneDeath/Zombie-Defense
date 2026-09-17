@@ -415,12 +415,15 @@ func _update_zombies(delta: float) -> void:
 		var knockback_velocity: Vector2 = zombie.knockback_velocity
 		if not knockback_velocity.is_zero_approx():
 			var knocked_position := _zombie_position(zombie) + knockback_velocity * delta
-			zombie.x = knocked_position.x / _map_size().x
-			zombie.y = knocked_position.y
-			zombie.knockback_velocity = knockback_velocity.move_toward(
-				Vector2.ZERO,
-				ZOMBIE_KNOCKBACK_DECELERATION * delta
-			)
+			if _zombie_position_blocked(knocked_position):
+				zombie.knockback_velocity = Vector2.ZERO
+			else:
+				zombie.x = knocked_position.x / _map_size().x
+				zombie.y = knocked_position.y
+				zombie.knockback_velocity = knockback_velocity.move_toward(
+					Vector2.ZERO,
+					ZOMBIE_KNOCKBACK_DECELERATION * delta
+				)
 		# Preserve route progress when a chase carries a zombie through either turn.
 		var route_position := _zombie_position(zombie)
 		var route_segment := int(zombie.route_segment)
@@ -444,10 +447,10 @@ func _update_zombies(delta: float) -> void:
 			var desired_angle := zombie_position.angle_to_point(target_position)
 			zombie.aim_angle = rotate_toward(zombie.aim_angle, desired_angle, ZOMBIE_TURN_SPEED * delta)
 			if distance > ZOMBIE_ATTACK_RANGE:
-				var direction := zombie_position.direction_to(swarm_position)
 				var speed: float = ZOMBIE_CHASE_SPEED * zombie.speed_multiplier * zombie.movement_factor
-				zombie.x += direction.x * speed * delta / _map_size().x
-				zombie.y += direction.y * speed * delta
+				var moved_position := _move_around_car(zombie_position, swarm_position, speed * delta)
+				zombie.x = moved_position.x / _map_size().x
+				zombie.y = moved_position.y
 			else:
 				zombie.attack_cooldown -= delta
 				if zombie.attack_cooldown <= 0.0:
@@ -471,12 +474,12 @@ func _update_zombies(delta: float) -> void:
 					route_target = second_turn
 				else:
 					route_target = Vector2(_route_exit_x(), _lower_road_y() - path_offset)
-			var route_direction := zombie_position.direction_to(route_target)
 			var desired_angle := zombie_position.angle_to_point(route_target)
 			zombie.aim_angle = rotate_toward(zombie.aim_angle, desired_angle, ZOMBIE_TURN_SPEED * delta)
 			var route_speed: float = ZOMBIE_SPEED * _map_size().x * zombie.speed_multiplier * zombie.movement_factor
-			zombie.x += route_direction.x * route_speed * delta / _map_size().x
-			zombie.y += route_direction.y * route_speed * delta
+			var moved_position := _move_around_car(zombie_position, route_target, route_speed * delta)
+			zombie.x = moved_position.x / _map_size().x
+			zombie.y = moved_position.y
 
 		if int(zombie.route_segment) >= 2 and _zombie_position(zombie).x > _route_exit_x():
 			zombies.erase(zombie)
@@ -487,6 +490,43 @@ func _update_zombies(delta: float) -> void:
 				return
 
 	_separate_zombies()
+	_keep_zombies_out_of_obstacles()
+
+func _zombie_position_blocked(position: Vector2) -> bool:
+	var obstacles: Array[Rect2] = [
+		_car_rect().grow(ZOMBIE_COLLISION_RADIUS),
+		_house_rect().grow(ZOMBIE_COLLISION_RADIUS)
+	]
+	for obstacle in obstacles:
+		if obstacle.has_point(position):
+			return true
+	return false
+
+func _keep_zombies_out_of_obstacles() -> void:
+	var obstacles: Array[Rect2] = [
+		_car_rect().grow(ZOMBIE_COLLISION_RADIUS),
+		_house_rect().grow(ZOMBIE_COLLISION_RADIUS)
+	]
+	for zombie in zombies:
+		var position := _zombie_position(zombie)
+		for obstacle in obstacles:
+			if not obstacle.has_point(position):
+				continue
+			var left_distance := position.x - obstacle.position.x
+			var right_distance := obstacle.end.x - position.x
+			var top_distance := position.y - obstacle.position.y
+			var bottom_distance := obstacle.end.y - position.y
+			var nearest := minf(minf(left_distance, right_distance), minf(top_distance, bottom_distance))
+			if nearest == left_distance:
+				position.x = obstacle.position.x - 1.0
+			elif nearest == right_distance:
+				position.x = obstacle.end.x + 1.0
+			elif nearest == top_distance:
+				position.y = obstacle.position.y - 1.0
+			else:
+				position.y = obstacle.end.y + 1.0
+		zombie.x = position.x / _map_size().x
+		zombie.y = position.y
 
 func _separate_zombies() -> void:
 	var map_width := _map_size().x
