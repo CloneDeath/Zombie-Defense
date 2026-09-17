@@ -804,8 +804,9 @@ func _move_around_car(current: Vector2, target: Vector2, distance: float) -> Vec
 	if not _segment_intersects_rect(current, target, obstacle):
 		return current.move_toward(target, distance)
 
-	# Pick the shortest reachable corner. Re-evaluating each frame naturally
-	# carries the survivor around the near corner and then the far corner.
+	# Find a complete clear route, including the second corner when the target is
+	# across the car. This prevents a unit from repeatedly choosing the corner it
+	# has already reached and becoming pinned there.
 	var clearance := 8.0
 	var waypoints: Array[Vector2] = [
 		obstacle.position - Vector2(clearance, clearance),
@@ -813,18 +814,52 @@ func _move_around_car(current: Vector2, target: Vector2, distance: float) -> Vec
 		Vector2(obstacle.position.x - clearance, obstacle.end.y + clearance),
 		obstacle.end + Vector2(clearance, clearance)
 	]
-	var best_waypoint := current
+	var best_first := Vector2.ZERO
 	var best_distance := INF
+
+	# A single corner is enough when it has clear sight to both endpoints.
 	for waypoint in waypoints:
+		if current.distance_to(waypoint) <= 1.0:
+			continue
 		if _segment_intersects_rect(current, waypoint, obstacle):
+			continue
+		if _segment_intersects_rect(waypoint, target, obstacle):
 			continue
 		var route_distance := current.distance_to(waypoint) + waypoint.distance_to(target)
 		if route_distance < best_distance:
 			best_distance = route_distance
-			best_waypoint = waypoint
-	if best_waypoint == current:
+			best_first = waypoint
+
+	# Targets on the opposite side require travelling around two adjacent
+	# corners. If the first corner was already reached, advance to the second.
+	for first in waypoints:
+		for second in waypoints:
+			if first == second:
+				continue
+			if _segment_intersects_rect(first, second, obstacle):
+				continue
+			if _segment_intersects_rect(second, target, obstacle):
+				continue
+			var first_leg := current
+			var next_waypoint := first
+			if current.distance_to(first) <= 1.0:
+				next_waypoint = second
+			else:
+				if _segment_intersects_rect(current, first, obstacle):
+					continue
+				first_leg = first
+			if next_waypoint == second and _segment_intersects_rect(current, second, obstacle):
+				continue
+			var route_distance := current.distance_to(first_leg)
+			route_distance += first.distance_to(second)
+			route_distance += second.distance_to(target)
+			if route_distance < best_distance:
+				best_distance = route_distance
+				best_first = next_waypoint
+
+	if best_distance == INF:
 		return current
-	return current.move_toward(best_waypoint, distance)
+	return current.move_toward(best_first, distance)
 
 func _closest_zombie_in_baseball_roam() -> Dictionary:
 	var closest: Dictionary = {}
