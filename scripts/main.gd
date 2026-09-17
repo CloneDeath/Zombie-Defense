@@ -601,7 +601,7 @@ func _update_survivor(delta: float) -> void:
 		else:
 			return
 
-	survivor_target = _spawn_points()[survivor_spawn]
+	survivor_target = _zone_home(survivor_spawn, "cop")
 	var target := _closest_zombie()
 	var distance_to_zombie := INF
 	if not target.is_empty():
@@ -658,7 +658,7 @@ func _update_baseball_survivor(delta: float) -> void:
 			_clear_zombie_target("baseball")
 		return
 
-	baseball_target = _spawn_points()[baseball_spawn]
+	baseball_target = _zone_home(baseball_spawn, "baseball")
 	baseball_attack_cooldown -= delta
 	baseball_swing_time = maxf(0.0, baseball_swing_time - delta)
 	var target := _closest_zombie_in_baseball_roam()
@@ -673,8 +673,7 @@ func _update_baseball_survivor(delta: float) -> void:
 				baseball_is_walking = true
 				var retreat_direction := target_position.direction_to(baseball_position)
 				var next_position := baseball_position + retreat_direction * BASEBALL_RECHARGE_SPEED * delta
-				var max_roam := BASEBALL_ROAM_METERS * TILE_SIZE
-				if next_position.distance_to(baseball_target) <= max_roam:
+				if _point_in_deployment_zone(next_position, baseball_spawn):
 					baseball_position = _move_around_car(baseball_position, next_position, BASEBALL_RECHARGE_SPEED * delta)
 			else:
 				baseball_is_walking = false
@@ -757,7 +756,7 @@ func _closest_zombie_in_baseball_roam() -> Dictionary:
 	var closest_distance := INF
 	for zombie in zombies:
 		var zombie_position := _zombie_position(zombie)
-		if zombie_position.distance_to(baseball_target) > BASEBALL_ROAM_METERS * TILE_SIZE:
+		if not _point_in_deployment_zone(zombie_position, baseball_spawn, BASEBALL_MELEE_METERS * TILE_SIZE):
 			continue
 		var distance := baseball_position.distance_to(zombie_position)
 		if distance < closest_distance:
@@ -1213,7 +1212,7 @@ func _set_selected_survivor_destination(index: int) -> void:
 			_place_survivor(index)
 		else:
 			survivor_spawn = index
-			survivor_target = _spawn_points()[index]
+			survivor_target = _zone_home(index, "cop")
 			survivor_is_walking = survivor_position.distance_to(survivor_target) > 1.0
 			survivor_selected = false
 	elif baseball_selected:
@@ -1221,7 +1220,7 @@ func _set_selected_survivor_destination(index: int) -> void:
 			_place_baseball_survivor(index)
 		else:
 			baseball_spawn = index
-			baseball_target = _spawn_points()[index]
+			baseball_target = _zone_home(index, "baseball")
 			baseball_selected = false
 	dragging_survivor = false
 	dragging_unit = ""
@@ -1229,7 +1228,7 @@ func _set_selected_survivor_destination(index: int) -> void:
 
 func _place_survivor(index: int) -> void:
 	survivor_spawn = index
-	survivor_target = _spawn_points()[index]
+	survivor_target = _zone_home(index, "cop")
 	survivor_position = _survivor_entry_position()
 	survivor_aim_angle = PI
 	survivor_is_walking = true
@@ -1239,7 +1238,7 @@ func _place_survivor(index: int) -> void:
 
 func _place_baseball_survivor(index: int) -> void:
 	baseball_spawn = index
-	baseball_target = _spawn_points()[index]
+	baseball_target = _zone_home(index, "baseball")
 	baseball_position = _survivor_entry_position()
 	baseball_aim_angle = PI
 	baseball_is_walking = true
@@ -1249,13 +1248,15 @@ func _place_baseball_survivor(index: int) -> void:
 
 func _spawn_point_at(position: Vector2) -> int:
 	position = _screen_to_map(position)
-	var points := _spawn_points()
-	for i in points.size():
-		var occupied_by_other := (
-			(i == survivor_spawn and baseball_selected)
-			or (i == baseball_spawn and survivor_selected)
+	var zones := _deployment_zones()
+	for i in zones.size():
+		var zone := zones[i]
+		var center := zone.get_center()
+		var normalized := Vector2(
+			(position.x - center.x) / (zone.size.x * 0.5),
+			(position.y - center.y) / (zone.size.y * 0.5)
 		)
-		if not occupied_by_other and points[i].distance_to(position) <= 38.0:
+		if normalized.length_squared() <= 1.0:
 			return i
 	return -1
 
@@ -1334,13 +1335,43 @@ func _survivor_entry_position() -> Vector2:
 	return Vector2(_route_exit_x(), _lower_road_y())
 
 func _spawn_points() -> Array[Vector2]:
-	var half_width := STREET_WIDTH_TILES * TILE_SIZE * 0.5
+	var centers: Array[Vector2] = []
+	for zone in _deployment_zones():
+		centers.append(zone.get_center())
+	return centers
+
+func _deployment_zones() -> Array[Rect2]:
 	return [
-		Vector2(TILE_SIZE * 4.5, _upper_road_y() - half_width - TILE_SIZE * 0.35),
-		Vector2(TILE_SIZE * 5.8, _upper_road_y() + half_width + TILE_SIZE * 0.35),
-		Vector2(TILE_SIZE * 13.7, _lower_road_y() - half_width - TILE_SIZE * 0.35),
-		Vector2(TILE_SIZE * 16.2, _lower_road_y() + half_width + TILE_SIZE * 0.35)
+		Rect2(Vector2(105, 105), Vector2(280, 175)),
+		Rect2(Vector2(405, 80), Vector2(350, 275)),
+		Rect2(Vector2(850, 85), Vector2(355, 285)),
+		Rect2(Vector2(90, 605), Vector2(285, 270)),
+		Rect2(Vector2(390, 590), Vector2(370, 330)),
+		Rect2(Vector2(845, 665), Vector2(360, 285))
 	]
+
+func _zone_home(index: int, unit: String) -> Vector2:
+	var zone := _deployment_zones()[index]
+	# Zone 5 surrounds the abandoned car; split the home positions around it
+	# so survivors naturally use opposite sides instead of targeting its body.
+	if index == 4:
+		return Vector2(500, 825) if unit == "cop" else Vector2(710, 820)
+	var offset := Vector2(-zone.size.x * 0.13, zone.size.y * 0.08)
+	if unit == "baseball":
+		offset = Vector2(zone.size.x * 0.13, -zone.size.y * 0.08)
+	return zone.get_center() + offset
+
+func _point_in_deployment_zone(point: Vector2, index: int, padding: float = 0.0) -> bool:
+	if index < 0:
+		return false
+	var zone := _deployment_zones()[index]
+	var center := zone.get_center()
+	var radius := zone.size * 0.5 + Vector2.ONE * padding
+	var normalized := Vector2(
+		(point.x - center.x) / radius.x,
+		(point.y - center.y) / radius.y
+	)
+	return normalized.length_squared() <= 1.0
 
 func _survivor_card_rect() -> Rect2:
 	return Rect2(size.x * 0.5 - 112, size.y - 105, 104, 92)
@@ -1386,16 +1417,18 @@ func _draw() -> void:
 	# The road and sidewalks extend through the overscan past both soft bounds,
 	# so dragging beyond an edge still looks like the street continues.
 
-	var points := _spawn_points()
-	for i in points.size():
-		var point := _map_to_screen(points[i])
-		var occupied := i == survivor_spawn or i == baseball_spawn
+	var zones := _deployment_zones()
+	for i in zones.size():
+		var polygon := _zone_screen_polygon(zones[i])
+		var assigned := i == survivor_spawn or i == baseball_spawn
 		var choosing := survivor_selected or baseball_selected
-		var point_color := Color("#d9ba58") if choosing and not occupied else Color("#78917a")
-		draw_circle(point, 30 * map_zoom, Color(point_color, 0.35))
-		draw_arc(point, 30 * map_zoom, 0, TAU, 32, point_color, 3)
-		if not occupied:
-			draw_string(ThemeDB.fallback_font, point + Vector2(-7, 7), "+", HORIZONTAL_ALIGNMENT_CENTER, 14, 22, point_color)
+		var zone_color := Color("#e8be4d") if choosing else (Color("#62a8d8") if assigned else Color("#78917a"))
+		draw_colored_polygon(polygon, Color(zone_color, 0.14 if not choosing else 0.24))
+		var outline := polygon.duplicate()
+		outline.append(polygon[0])
+		draw_polyline(outline, Color(zone_color, 0.72), 3.0)
+		var label_position := _map_to_screen(zones[i].get_center()) + Vector2(-36, 6)
+		draw_string(ThemeDB.fallback_font, label_position, "ZONE %d" % (i + 1), HORIZONTAL_ALIGNMENT_CENTER, 72, 15, Color(zone_color, 0.9))
 
 	if survivor_spawn >= 0 and not survivor_evacuated:
 		var survivor_screen := _map_to_screen(survivor_position)
@@ -1505,6 +1538,16 @@ func _draw() -> void:
 	elif baseball_selected and baseball_spawn >= 0 and not baseball_evacuated:
 		_draw_baseball_info_panel()
 
+func _zone_screen_polygon(zone: Rect2) -> PackedVector2Array:
+	var polygon := PackedVector2Array()
+	var center := zone.get_center()
+	var radius := zone.size * 0.5
+	for i in 40:
+		var angle := TAU * float(i) / 40.0
+		var map_point := center + Vector2(cos(angle) * radius.x, sin(angle) * radius.y)
+		polygon.append(_map_to_screen(map_point))
+	return polygon
+
 func _draw_map_preview() -> void:
 	var preview_width := minf(440.0, size.x - 40.0)
 	var preview_height := minf(240.0, size.y * 0.30)
@@ -1528,12 +1571,15 @@ func _draw_map_preview() -> void:
 	draw_rect(house.grow(-6.0), Color("#c98c4a"))
 	draw_line(Vector2(house.position.x + 42.0, house.position.y + 6.0), Vector2(house.position.x + 42.0, house.end.y - 6.0), Color("#454545"), 4.0)
 	for point in [
-		Vector2(preview.position.x + 82.0, upper_y - road_width),
-		Vector2(preview.position.x + 145.0, upper_y + road_width),
-		Vector2(preview.end.x - 130.0, lower_y - road_width),
-		Vector2(preview.end.x - 62.0, lower_y + road_width)
+		Vector2(preview.position.x + preview.size.x * 0.18, preview.position.y + preview.size.y * 0.20),
+		Vector2(preview.position.x + preview.size.x * 0.45, preview.position.y + preview.size.y * 0.21),
+		Vector2(preview.position.x + preview.size.x * 0.78, preview.position.y + preview.size.y * 0.22),
+		Vector2(preview.position.x + preview.size.x * 0.18, preview.position.y + preview.size.y * 0.72),
+		Vector2(preview.position.x + preview.size.x * 0.45, preview.position.y + preview.size.y * 0.70),
+		Vector2(preview.position.x + preview.size.x * 0.79, preview.position.y + preview.size.y * 0.72)
 	]:
-		draw_circle(point, 7.0, Color("#d9ba58"))
+		draw_circle(point, 9.0, Color(0.85, 0.73, 0.35, 0.55))
+		draw_arc(point, 9.0, 0.0, TAU, 20, Color("#d9ba58"), 2.0)
 
 func _draw_decor() -> void:
 	_draw_house_interior()
