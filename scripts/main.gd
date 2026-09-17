@@ -141,6 +141,9 @@ var health_label: Label
 var results_label: Label
 var version_label: Label
 var begin_button: Button
+var map_button: Button
+var start_map_button: Button
+var selection_back_button: Button
 var retry_button: Button
 var menu_button: Button
 var pause_button: Button
@@ -160,7 +163,13 @@ func _ready() -> void:
 	version_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 
 	begin_button = _make_button("BEGIN")
-	begin_button.pressed.connect(_start_game)
+	begin_button.pressed.connect(_show_overworld)
+	map_button = _make_button("RURAL CROSSROADS")
+	map_button.pressed.connect(_show_map_preview)
+	start_map_button = _make_button("START")
+	start_map_button.pressed.connect(_start_game)
+	selection_back_button = _make_button("BACK")
+	selection_back_button.pressed.connect(_selection_back)
 	retry_button = _make_button("RETRY")
 	retry_button.pressed.connect(_start_game)
 	menu_button = _make_button("BACK TO MENU")
@@ -177,6 +186,8 @@ func _ready() -> void:
 		call_deferred("_run_headless_gameplay_smoke_test")
 
 func _run_headless_gameplay_smoke_test() -> void:
+	_show_overworld()
+	_show_map_preview()
 	_start_game()
 	_place_survivor(0)
 	_place_baseball_survivor(1)
@@ -223,10 +234,17 @@ func _layout_ui() -> void:
 	health_label.position = Vector2(10, 45)
 	health_label.size = Vector2(size.x - 20, 40)
 	health_label.add_theme_font_size_override("font_size", 20 if portrait else 24)
-	results_label.position = Vector2(10, size.y * (0.38 if portrait else 0.36))
+	var selection_screen := screen == "overworld" or screen == "map_preview"
+	results_label.position = Vector2(10, size.y * (0.27 if selection_screen else (0.38 if portrait else 0.36)))
 	results_label.size = Vector2(size.x - 20, 76)
 	begin_button.position = Vector2(center_x - 100, size.y * 0.52)
 	begin_button.size = Vector2(200, 58)
+	map_button.position = Vector2(center_x - 140, size.y * 0.46)
+	map_button.size = Vector2(280, 72)
+	start_map_button.position = Vector2(center_x - 95, size.y * 0.75)
+	start_map_button.size = Vector2(190, 58)
+	selection_back_button.position = Vector2(center_x - 75, size.y * 0.84)
+	selection_back_button.size = Vector2(150, 50)
 	if portrait:
 		retry_button.position = Vector2(center_x - 100, size.y * 0.56)
 		retry_button.size = Vector2(200, 58)
@@ -268,6 +286,41 @@ func _retreat_survivors() -> void:
 		has_survivor_to_retreat = true
 	retreat_button.disabled = has_survivor_to_retreat
 	queue_redraw()
+
+func _show_overworld() -> void:
+	screen = "overworld"
+	title_label.text = "SELECT MAP"
+	title_label.show()
+	results_label.text = "Choose where to make your stand."
+	results_label.show()
+	begin_button.hide()
+	map_button.show()
+	start_map_button.hide()
+	selection_back_button.show()
+	menu_button.hide()
+	retry_button.hide()
+	pause_button.hide()
+	fast_forward_button.hide()
+	retreat_button.hide()
+	health_label.hide()
+	_layout_ui()
+	queue_redraw()
+
+func _show_map_preview() -> void:
+	screen = "map_preview"
+	title_label.text = "RURAL CROSSROADS"
+	results_label.text = "Rural neighborhood\nZombies enter from the west and escape to the east."
+	map_button.hide()
+	start_map_button.show()
+	selection_back_button.show()
+	_layout_ui()
+	queue_redraw()
+
+func _selection_back() -> void:
+	if screen == "map_preview":
+		_show_overworld()
+	else:
+		_show_menu()
 
 func _process(delta: float) -> void:
 	if screen != "playing":
@@ -856,6 +909,7 @@ func _award_baseball_xp() -> void:
 
 func _start_game() -> void:
 	screen = "playing"
+	_layout_ui()
 	health = STARTING_HEALTH
 	zombies_passed = 0
 	zombies_killed = 0
@@ -914,6 +968,9 @@ func _start_game() -> void:
 	title_label.hide()
 	results_label.hide()
 	begin_button.hide()
+	map_button.hide()
+	start_map_button.hide()
+	selection_back_button.hide()
 	retry_button.hide()
 	menu_button.hide()
 	pause_button.show()
@@ -924,11 +981,15 @@ func _start_game() -> void:
 
 func _show_menu() -> void:
 	screen = "menu"
+	_layout_ui()
 	title_label.text = "ZOMBIE DEFENSE"
 	title_label.show()
 	health_label.hide()
 	results_label.hide()
 	begin_button.show()
+	map_button.hide()
+	start_map_button.hide()
+	selection_back_button.hide()
 	retry_button.hide()
 	menu_button.hide()
 	pause_button.hide()
@@ -938,12 +999,16 @@ func _show_menu() -> void:
 
 func _show_results() -> void:
 	screen = "results"
+	_layout_ui()
 	health_label.hide()
 	title_label.show()
 	title_label.text = "THE TOWN FELL"
 	results_label.text = "Reached wave %d\n%d zombies killed" % [wave, zombies_killed]
 	results_label.show()
 	begin_button.hide()
+	map_button.hide()
+	start_map_button.hide()
+	selection_back_button.hide()
 	retry_button.show()
 	menu_button.show()
 	pause_button.hide()
@@ -1291,6 +1356,9 @@ func _survivor_range() -> float:
 
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), Color("#111812"))
+	if screen == "map_preview":
+		_draw_map_preview()
+		return
 	if screen != "playing":
 		return
 
@@ -1436,6 +1504,36 @@ func _draw() -> void:
 		_draw_survivor_info_panel()
 	elif baseball_selected and baseball_spawn >= 0 and not baseball_evacuated:
 		_draw_baseball_info_panel()
+
+func _draw_map_preview() -> void:
+	var preview_width := minf(440.0, size.x - 40.0)
+	var preview_height := minf(240.0, size.y * 0.30)
+	var preview := Rect2(
+		Vector2((size.x - preview_width) * 0.5, size.y * 0.39),
+		Vector2(preview_width, preview_height)
+	)
+	draw_rect(preview, Color("#2ebd72"))
+	draw_rect(preview, Color("#93b49b"), false, 3.0)
+	var road_width := preview_height * 0.22
+	var junction_x := preview.position.x + preview.size.x * 0.48
+	var upper_y := preview.position.y + preview.size.y * 0.32
+	var lower_y := preview.position.y + preview.size.y * 0.70
+	var road_color := Color("#4b4b4b")
+	draw_rect(Rect2(preview.position.x, upper_y - road_width * 0.5, junction_x - preview.position.x, road_width), road_color)
+	draw_rect(Rect2(junction_x - road_width * 0.5, preview.position.y, road_width, preview.size.y), road_color)
+	draw_rect(Rect2(junction_x, lower_y - road_width * 0.5, preview.end.x - junction_x, road_width), road_color)
+	# Small roofless house marker in the northeast lot.
+	var house := Rect2(Vector2(preview.end.x - 112.0, preview.position.y + 14.0), Vector2(88.0, 58.0))
+	draw_rect(house, Color("#ef6c16"))
+	draw_rect(house.grow(-6.0), Color("#c98c4a"))
+	draw_line(Vector2(house.position.x + 42.0, house.position.y + 6.0), Vector2(house.position.x + 42.0, house.end.y - 6.0), Color("#454545"), 4.0)
+	for point in [
+		Vector2(preview.position.x + 82.0, upper_y - road_width),
+		Vector2(preview.position.x + 145.0, upper_y + road_width),
+		Vector2(preview.end.x - 130.0, lower_y - road_width),
+		Vector2(preview.end.x - 62.0, lower_y + road_width)
+	]:
+		draw_circle(point, 7.0, Color("#d9ba58"))
 
 func _draw_decor() -> void:
 	_draw_house_interior()
