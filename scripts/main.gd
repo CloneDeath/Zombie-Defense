@@ -101,6 +101,7 @@ var baseball_selected := false
 var baseball_position := Vector2.ZERO
 var baseball_target := Vector2.ZERO
 var baseball_is_walking := false
+var baseball_zone_move := false
 var baseball_retreating := false
 var baseball_evacuated := false
 var baseball_aim_angle := PI
@@ -282,6 +283,7 @@ func _retreat_survivors() -> void:
 		has_survivor_to_retreat = true
 	if baseball_spawn >= 0 and baseball_alive and not baseball_evacuated:
 		baseball_retreating = true
+		baseball_zone_move = false
 		baseball_selected = false
 		has_survivor_to_retreat = true
 	retreat_button.disabled = has_survivor_to_retreat
@@ -573,6 +575,7 @@ func _kill_baseball_survivor() -> void:
 	baseball_selected = false
 	dragging_survivor = false
 	baseball_is_walking = false
+	baseball_zone_move = false
 	for zombie in zombies:
 		if zombie.target_id == "baseball":
 			zombie.target_id = ""
@@ -659,6 +662,8 @@ func _update_baseball_survivor(delta: float) -> void:
 		return
 
 	baseball_target = _zone_home(baseball_spawn, "baseball")
+	if baseball_zone_move and baseball_position.distance_to(baseball_target) <= 8.0:
+		baseball_zone_move = false
 	baseball_attack_cooldown -= delta
 	baseball_swing_time = maxf(0.0, baseball_swing_time - delta)
 	var target := _closest_zombie_in_baseball_roam()
@@ -934,6 +939,7 @@ func _start_game() -> void:
 	baseball_position = Vector2.ZERO
 	baseball_target = Vector2.ZERO
 	baseball_is_walking = false
+	baseball_zone_move = false
 	baseball_retreating = false
 	baseball_evacuated = false
 	baseball_aim_angle = PI
@@ -1166,6 +1172,13 @@ func _screen_to_map(screen_position: Vector2) -> Vector2:
 	return (screen_position - map_offset) / map_zoom
 
 func _handle_pointer_down(position: Vector2) -> bool:
+	if (survivor_selected or baseball_selected) and _survivor_info_close_rect().has_point(position):
+		survivor_selected = false
+		baseball_selected = false
+		dragging_survivor = false
+		dragging_unit = ""
+		queue_redraw()
+		return true
 	var touched_cop := (
 		(survivor_spawn < 0 and _survivor_card_rect().has_point(position))
 		or (survivor_spawn >= 0 and survivor_alive and not survivor_retreating and not survivor_evacuated and _map_to_screen(survivor_position).distance_to(position) <= 42.0)
@@ -1210,6 +1223,8 @@ func _set_selected_survivor_destination(index: int) -> void:
 	if survivor_selected:
 		if survivor_spawn < 0:
 			_place_survivor(index)
+		elif survivor_spawn == index:
+			survivor_selected = false
 		else:
 			survivor_spawn = index
 			survivor_target = _zone_home(index, "cop")
@@ -1218,9 +1233,12 @@ func _set_selected_survivor_destination(index: int) -> void:
 	elif baseball_selected:
 		if baseball_spawn < 0:
 			_place_baseball_survivor(index)
+		elif baseball_spawn == index:
+			baseball_selected = false
 		else:
 			baseball_spawn = index
 			baseball_target = _zone_home(index, "baseball")
+			baseball_zone_move = true
 			baseball_selected = false
 	dragging_survivor = false
 	dragging_unit = ""
@@ -1242,6 +1260,7 @@ func _place_baseball_survivor(index: int) -> void:
 	baseball_position = _survivor_entry_position()
 	baseball_aim_angle = PI
 	baseball_is_walking = true
+	baseball_zone_move = true
 	baseball_selected = false
 	dragging_survivor = false
 	baseball_attack_cooldown = 0.0
@@ -1404,18 +1423,18 @@ func _draw() -> void:
 	# The road and sidewalks extend through the overscan past both soft bounds,
 	# so dragging beyond an edge still looks like the street continues.
 
-	var zones := _deployment_zones()
-	for i in zones.size():
-		var polygon := _zone_screen_polygon(zones[i])
-		var assigned := i == survivor_spawn or i == baseball_spawn
-		var choosing := survivor_selected or baseball_selected
-		var zone_color := Color("#e8be4d") if choosing else (Color("#62a8d8") if assigned else Color("#78917a"))
-		draw_colored_polygon(polygon, Color(zone_color, 0.14 if not choosing else 0.24))
-		var outline := polygon.duplicate()
-		outline.append(polygon[0])
-		draw_polyline(outline, Color(zone_color, 0.72), 3.0)
-		var label_position := _map_to_screen(zones[i].get_center()) + Vector2(-36, 6)
-		draw_string(ThemeDB.fallback_font, label_position, "ZONE %d" % (i + 1), HORIZONTAL_ALIGNMENT_CENTER, 72, 15, Color(zone_color, 0.9))
+	if survivor_selected or baseball_selected:
+		var zones := _deployment_zones()
+		for i in zones.size():
+			var polygon := _zone_screen_polygon(zones[i])
+			var assigned := i == survivor_spawn or i == baseball_spawn
+			var zone_color := Color("#62a8d8") if assigned else Color("#e8be4d")
+			draw_colored_polygon(polygon, Color(zone_color, 0.22))
+			var outline := polygon.duplicate()
+			outline.append(polygon[0])
+			draw_polyline(outline, Color(zone_color, 0.78), 3.0)
+			var label_position := _map_to_screen(zones[i].get_center()) + Vector2(-36, 6)
+			draw_string(ThemeDB.fallback_font, label_position, "ZONE %d" % (i + 1), HORIZONTAL_ALIGNMENT_CENTER, 72, 15, Color(zone_color, 0.95))
 
 	if survivor_spawn >= 0 and not survivor_evacuated:
 		var survivor_screen := _map_to_screen(survivor_position)
@@ -1446,6 +1465,20 @@ func _draw() -> void:
 
 	if baseball_spawn >= 0 and not baseball_evacuated:
 		var baseball_screen := _map_to_screen(baseball_position)
+		if baseball_alive and baseball_zone_move:
+			var destination_screen := _map_to_screen(baseball_target)
+			var arrow_direction := baseball_screen.direction_to(destination_screen)
+			var arrow_tip := destination_screen
+			var arrow_base := arrow_tip - arrow_direction * 18.0
+			var arrow_side := arrow_direction.orthogonal() * 9.0
+			var arrow_color := Color(0.20, 0.65, 1.0, 0.58)
+			draw_line(baseball_screen, arrow_base, arrow_color, 4.0)
+			draw_colored_polygon(
+				PackedVector2Array([arrow_tip, arrow_base + arrow_side, arrow_base - arrow_side]),
+				arrow_color
+			)
+			draw_circle(destination_screen, 11.0, Color(0.20, 0.65, 1.0, 0.22))
+			draw_arc(destination_screen, 11.0, 0.0, TAU, 24, arrow_color, 2.0)
 		if baseball_alive and baseball_selected:
 			var melee_range := BASEBALL_MELEE_METERS * TILE_SIZE * map_zoom
 			draw_circle(baseball_screen, melee_range, Color(0.25, 0.55, 1.0, 0.06))
@@ -1625,12 +1658,24 @@ func _draw_house_interior() -> void:
 	draw_texture_rect(HOUSE_SOFA_TEXTURE, Rect2(Vector2(1080, 198), Vector2(92, 58)), false)
 	draw_texture_rect(HOUSE_PLANT_TEXTURE, Rect2(Vector2(1114, 137), Vector2(58, 58)), false)
 
+func _survivor_info_close_rect() -> Rect2:
+	return Rect2(Vector2(234, size.y - 168), Vector2(36, 36))
+
+func _draw_survivor_info_close_button(color: Color) -> void:
+	var hit_rect := _survivor_info_close_rect()
+	var button_rect := hit_rect.grow(-5.0)
+	draw_rect(button_rect, Color(0.08, 0.09, 0.10, 0.95))
+	draw_rect(button_rect, color, false, 2.0)
+	draw_line(button_rect.position + Vector2(7, 7), button_rect.end - Vector2(7, 7), color, 2.5)
+	draw_line(Vector2(button_rect.end.x - 7, button_rect.position.y + 7), Vector2(button_rect.position.x + 7, button_rect.end.y - 7), color, 2.5)
+
 func _draw_survivor_info_panel() -> void:
 	var panel_size := Vector2(260, 158)
 	var panel_position := Vector2(14, size.y - panel_size.y - 14)
 	var panel := Rect2(panel_position, panel_size)
 	draw_rect(panel, Color(0.035, 0.055, 0.08, 0.92))
 	draw_rect(panel, Color(0.25, 0.62, 0.92, 0.9), false, 2.0)
+	_draw_survivor_info_close_button(Color("#83c7ff"))
 
 	var portrait := Rect2(panel_position + Vector2(12, 36), Vector2(76, 76))
 	draw_rect(portrait, Color(0.10, 0.20, 0.30, 1.0))
@@ -1658,6 +1703,7 @@ func _draw_baseball_info_panel() -> void:
 	var panel := Rect2(panel_position, panel_size)
 	draw_rect(panel, Color(0.05, 0.045, 0.035, 0.92))
 	draw_rect(panel, Color(0.82, 0.55, 0.27, 0.9), false, 2.0)
+	_draw_survivor_info_close_button(Color("#f0b96f"))
 	var portrait := Rect2(panel_position + Vector2(12, 36), Vector2(76, 76))
 	draw_rect(portrait, Color(0.18, 0.13, 0.08, 1.0))
 	draw_texture_rect(BASEBALL_TEXTURE, portrait, false)
