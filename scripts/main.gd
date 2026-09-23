@@ -903,6 +903,15 @@ func _move_around_car(current: Vector2, target: Vector2, distance: float) -> Vec
 	if not obstacle_found:
 		return current.move_toward(target, distance)
 
+	# A route checkpoint can fall underneath a parked car. Aim for the far side
+	# of that car instead, so the unit clears it and route progress can continue.
+	if obstacle.has_point(target):
+		var travel_direction := current.direction_to(target)
+		if absf(travel_direction.x) >= absf(travel_direction.y):
+			target.x = obstacle.end.x + 1.0 if travel_direction.x >= 0.0 else obstacle.position.x - 1.0
+		else:
+			target.y = obstacle.end.y + 1.0 if travel_direction.y >= 0.0 else obstacle.position.y - 1.0
+
 	# Unit separation can occasionally shove a survivor just inside an
 	# obstacle's clearance box. Recover before calculating waypoints.
 	if obstacle.has_point(current):
