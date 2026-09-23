@@ -808,15 +808,21 @@ func _zone_edge_toward(point: Vector2, zone: Rect2) -> Vector2:
 	)
 
 func _random_patrol_point(zone: Rect2) -> Vector2:
-	var car_clearance := _car_rect().grow(30.0)
-	for attempt in 8:
+	var obstacles := _car_obstacle_rects(30.0)
+	obstacles.append(_house_rect().grow(24.0))
+	for attempt in 16:
 		var point := Vector2(
 			randf_range(zone.position.x, zone.end.x),
 			randf_range(zone.position.y, zone.end.y)
 		)
-		if not car_clearance.has_point(point):
+		var blocked := false
+		for obstacle in obstacles:
+			if obstacle.has_point(point):
+				blocked = true
+				break
+		if not blocked:
 			return point
-	return zone.position + Vector2(36.0, 36.0)
+	return zone.get_center()
 
 func _cars() -> Array[Dictionary]:
 	return [
