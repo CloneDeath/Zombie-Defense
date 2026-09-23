@@ -493,20 +493,16 @@ func _update_zombies(delta: float) -> void:
 	_keep_zombies_out_of_obstacles()
 
 func _zombie_position_blocked(position: Vector2) -> bool:
-	var obstacles: Array[Rect2] = [
-		_car_rect().grow(ZOMBIE_COLLISION_RADIUS),
-		_house_rect().grow(ZOMBIE_COLLISION_RADIUS)
-	]
+	var obstacles := _car_obstacle_rects(ZOMBIE_COLLISION_RADIUS)
+	obstacles.append(_house_rect().grow(ZOMBIE_COLLISION_RADIUS))
 	for obstacle in obstacles:
 		if obstacle.has_point(position):
 			return true
 	return false
 
 func _keep_zombies_out_of_obstacles() -> void:
-	var obstacles: Array[Rect2] = [
-		_car_rect().grow(ZOMBIE_COLLISION_RADIUS),
-		_house_rect().grow(ZOMBIE_COLLISION_RADIUS)
-	]
+	var obstacles := _car_obstacle_rects(ZOMBIE_COLLISION_RADIUS)
+	obstacles.append(_house_rect().grow(ZOMBIE_COLLISION_RADIUS))
 	for zombie in zombies:
 		var position := _zombie_position(zombie)
 		for obstacle in obstacles:
@@ -650,7 +646,9 @@ func _update_survivor(delta: float) -> void:
 	var target := _closest_zombie()
 	var distance_to_zombie := INF
 	if not target.is_empty():
-		distance_to_zombie = survivor_position.distance_to(_zombie_position(target))
+		var zombie_position := _zombie_position(target)
+		distance_to_zombie = survivor_position.distance_to(zombie_position)
+		survivor_target = _cop_cover_position(zombie_position)
 
 	var zombie_in_range := distance_to_zombie <= _survivor_range()
 	var zombie_in_awareness := distance_to_zombie <= _survivor_range() * SURVIVOR_AWARENESS_MULTIPLIER
@@ -686,6 +684,32 @@ func _update_survivor(delta: float) -> void:
 		survivor_position = _move_around_car(survivor_position, survivor_target, travel_speed * delta)
 	else:
 		survivor_is_walking = false
+
+func _cop_cover_position(zombie_position: Vector2) -> Vector2:
+	var home := _zone_home(survivor_spawn, "cop")
+	if survivor_spawn < 0:
+		return home
+	var safe_zone := _deployment_zones()[survivor_spawn].grow(-SURVIVOR_COLLISION_RADIUS)
+	var best_position := home
+	var best_score := INF
+	for car_rect in _car_obstacle_rects(12.0):
+		var center := car_rect.get_center()
+		if not safe_zone.has_point(center):
+			continue
+		var away_from_zombie := zombie_position.direction_to(center)
+		if away_from_zombie.is_zero_approx():
+			away_from_zombie = Vector2.RIGHT
+		var cover_distance := maxf(car_rect.size.x, car_rect.size.y) * 0.5 + SURVIVOR_COLLISION_RADIUS + 8.0
+		var candidate := center + away_from_zombie * cover_distance
+		candidate.x = clampf(candidate.x, safe_zone.position.x, safe_zone.end.x)
+		candidate.y = clampf(candidate.y, safe_zone.position.y, safe_zone.end.y)
+		if _zombie_position_blocked(candidate):
+			continue
+		var score := survivor_position.distance_to(candidate) + zombie_position.distance_to(candidate) * 0.08
+		if score < best_score:
+			best_score = score
+			best_position = candidate
+	return best_position
 
 func _update_baseball_survivor(delta: float) -> void:
 	if baseball_spawn < 0 or not baseball_alive or baseball_evacuated:
@@ -794,8 +818,32 @@ func _random_patrol_point(zone: Rect2) -> Vector2:
 			return point
 	return zone.position + Vector2(36.0, 36.0)
 
+func _cars() -> Array[Dictionary]:
+	return [
+		{"center": Vector2(603, 678), "size": Vector2(96, 177), "rotation": PI * 0.5},
+		{"center": Vector2(245, 390), "size": Vector2(96, 177), "rotation": -0.22},
+		{"center": Vector2(650, 335), "size": Vector2(96, 177), "rotation": 0.12},
+		{"center": Vector2(1030, 900), "size": Vector2(96, 177), "rotation": PI * 0.5 + 0.18}
+	]
+
+func _rotated_car_rect(car: Dictionary) -> Rect2:
+	var car_size: Vector2 = car.size
+	var angle: float = car.rotation
+	var extent := Vector2(
+		absf(cos(angle)) * car_size.x + absf(sin(angle)) * car_size.y,
+		absf(sin(angle)) * car_size.x + absf(cos(angle)) * car_size.y
+	) * 0.5
+	var center: Vector2 = car.center
+	return Rect2(center - extent, extent * 2.0)
+
+func _car_obstacle_rects(grow_by: float = 0.0) -> Array[Rect2]:
+	var obstacles: Array[Rect2] = []
+	for car in _cars():
+		obstacles.append(_rotated_car_rect(car).grow(grow_by))
+	return obstacles
+
 func _car_rect() -> Rect2:
-	return Rect2(Vector2(555, 590), Vector2(96, 177))
+	return _rotated_car_rect(_cars()[0])
 
 func _house_rect() -> Rect2:
 	return Rect2(Vector2(875, 42), Vector2(330, 250))
@@ -829,10 +877,8 @@ func _segment_intersects_rect(from: Vector2, to: Vector2, rect: Rect2) -> bool:
 func _move_around_car(current: Vector2, target: Vector2, distance: float) -> Vector2:
 	# Route around whichever solid obstacle is encountered first. Keeping this
 	# in the shared movement helper makes both survivors respect the house.
-	var obstacles: Array[Rect2] = [
-		_car_rect().grow(30.0),
-		_house_rect().grow(24.0)
-	]
+	var obstacles := _car_obstacle_rects(30.0)
+	obstacles.append(_house_rect().grow(24.0))
 	var obstacle := Rect2()
 	var obstacle_found := false
 	var nearest_obstacle_distance := INF
@@ -1810,7 +1856,14 @@ func _draw_decor() -> void:
 	draw_texture_rect(MANHOLE_TEXTURE, Rect2(Vector2(930, 875), Vector2(48, 48)), false)
 	draw_texture_rect(OIL_SPILL_TEXTURE, Rect2(Vector2(465, 425), Vector2(58, 58)), false)
 	draw_texture_rect(OIL_SPILL_TEXTURE, Rect2(Vector2(760, 820), Vector2(54, 54)), false)
-	draw_texture_rect(CAR_TEXTURE, _car_rect(), false)
+	for car in _cars():
+		var car_center: Vector2 = car.center
+		var car_size: Vector2 = car.size
+		var car_rotation: float = car.rotation
+		draw_set_transform(map_offset + car_center * map_zoom, car_rotation, Vector2(map_zoom, map_zoom))
+		draw_texture_rect(CAR_TEXTURE, Rect2(-car_size * 0.5, car_size), false)
+	# Restore the map transform for the remaining decor.
+	draw_set_transform(map_offset, 0.0, Vector2(map_zoom, map_zoom))
 	draw_texture_rect(DEBRIS_TEXTURE, Rect2(Vector2(410, 610), Vector2(64, 64)), false)
 	draw_texture_rect(DEBRIS_TEXTURE, Rect2(Vector2(1085, 650), Vector2(56, 56)), false)
 
