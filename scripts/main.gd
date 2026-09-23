@@ -370,7 +370,7 @@ func _update_wave(delta: float) -> void:
 	wave_delay -= delta
 	if wave_delay <= 0.0:
 		wave += 1
-		zombies_left_to_spawn += int(pow(2.0, wave)) - 1
+		zombies_left_to_spawn += wave
 		wave_delay += TIME_BETWEEN_WAVES
 		if spawn_delay <= 0.0:
 			spawn_delay = randf_range(0.0, 0.2)
