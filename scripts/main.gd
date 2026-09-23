@@ -28,7 +28,7 @@ const CAMERA_SPRING_SPEED := 11.0
 const OVERSCROLL_RESISTANCE := 0.32
 const ZOMBIE_SPEED := 0.069
 const ZOMBIE_CHASE_SPEED := 55.0
-const ZOMBIE_ATTACK_RANGE := 46.0
+const ZOMBIE_ATTACK_RANGE := 54.0
 const ZOMBIE_ATTACK_RATE := 0.8
 const ZOMBIE_COLLISION_DIAMETER := 44.0
 const SURVIVOR_COLLISION_RADIUS := 22.0
@@ -748,6 +748,27 @@ func _update_baseball_survivor(delta: float) -> void:
 		return
 
 	baseball_zone_move = false
+
+	# Zone boundaries limit pursuit, not the bat itself. If a zombie reaches the
+	# batter at an edge, fight it even when its center is in the next zone.
+	var melee_target := _closest_zombie_to_baseball(BASEBALL_MELEE_METERS * TILE_SIZE)
+	if not melee_target.is_empty():
+		var melee_position := _zombie_position(melee_target)
+		var melee_angle := baseball_position.angle_to_point(melee_position)
+		baseball_aim_angle = rotate_toward(baseball_aim_angle, melee_angle, SURVIVOR_TURN_SPEED * delta)
+		if baseball_attack_cooldown <= 0.0:
+			baseball_is_walking = false
+			_swing_bat(melee_target)
+		else:
+			var retreat_direction := melee_position.direction_to(baseball_position)
+			var next_position := baseball_position + retreat_direction * BASEBALL_RECHARGE_SPEED * delta
+			if _point_in_deployment_zone(next_position, baseball_spawn):
+				baseball_is_walking = true
+				baseball_position = _move_around_car(baseball_position, next_position, BASEBALL_RECHARGE_SPEED * delta)
+			else:
+				baseball_is_walking = false
+		return
+
 	var target := _closest_zombie_in_baseball_roam()
 	if not target.is_empty():
 		var target_position := _zombie_position(target)
