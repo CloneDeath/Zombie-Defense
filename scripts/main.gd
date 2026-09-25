@@ -46,8 +46,6 @@ const BASEBALL_WAIT_DISTANCE_METERS := 2.0
 const BASEBALL_SPEED := 95.0
 const BASEBALL_RECHARGE_SPEED := 42.0
 const BASEBALL_ATTACK_RATE := 1.5
-const BASEBALL_DAMAGE := 0.5
-const BASEBALL_DAMAGE_PER_LEVEL := 0.15
 const BASEBALL_KNOCKBACK_SPEED := 420.0
 const ZOMBIE_KNOCKBACK_DECELERATION := 1225.0
 const BASEBALL_AOE_METERS := 0.9
@@ -75,6 +73,20 @@ const SURVIVOR_TURN_SPEED := 2.4
 const TIME_BETWEEN_WAVES := 8.0
 const MIN_TIME_BETWEEN_ZOMBIES := 0.08
 const MAX_TIME_BETWEEN_ZOMBIES := 0.48
+
+# A single source of truth for gameplay values, purchase limits and previews.
+const SKILLS := {
+	"cop_damage_skill": {"label": "STOPPING POWER", "base": 20.0, "step": 5.0, "cap": -1, "format": "%.0f damage"},
+	"cop_crit_skill": {"label": "CRITICAL CHANCE", "base": 0.10, "step": 0.10, "cap": 8, "format": "%.0f%%", "scale": 100.0},
+	"cop_range_skill": {"label": "ENGAGEMENT RANGE", "base": SURVIVOR_RANGE_METERS, "step": 1.0, "cap": 5, "format": "%.0fm"},
+	"cop_reload_skill": {"label": "QUICK RELOAD", "base": RELOAD_TIME, "step": -0.15, "cap": 6, "format": "%.3fs"},
+	"cop_magazine_skill": {"label": "EXTENDED MAGAZINE", "base": MAGAZINE_SIZE, "step": 2.0, "cap": 5, "format": "%.0f shots"},
+	"baseball_damage_skill": {"label": "POWER SWING", "base": 10.0, "step": 2.5, "cap": 16, "format": "%.1f damage"},
+	"baseball_cooldown_skill": {"label": "QUICK RECOVERY", "base": BASEBALL_ATTACK_RATE, "step": -0.125, "cap": 6, "format": "%.3fs"},
+	"baseball_knockback_skill": {"label": "HEAVY KNOCKBACK", "base": 1.0, "step": 1.0 / 6.0, "cap": 6, "format": "%.2fx distance"}
+}
+const COP_SKILLS := ["cop_damage_skill", "cop_crit_skill", "cop_range_skill", "cop_reload_skill", "cop_magazine_skill"]
+const BASEBALL_SKILLS := ["baseball_damage_skill", "baseball_cooldown_skill", "baseball_knockback_skill"]
 
 var screen := "menu"
 var health := STARTING_HEALTH
@@ -151,6 +163,7 @@ var blood_particles: Array[Dictionary] = []
 var level_up_effects: Array[Dictionary] = []
 var map_offset := Vector2.ZERO
 var map_dragging := false
+var map_gesture_moved := false
 var map_drag_position := Vector2.ZERO
 var map_zoom := 1.0
 var active_touches := {}
@@ -211,8 +224,100 @@ func _run_headless_gameplay_smoke_test() -> void:
 	_show_overworld()
 	_show_map_preview()
 	_start_game()
+	_run_regression_tests()
+	_start_game()
 	_place_survivor(0)
 	_place_baseball_survivor(1)
+
+func _run_regression_tests() -> void:
+	_test_skill_purchases()
+	_test_reload_progress()
+	_test_shot_intersections()
+	_test_selection_gestures()
+	print("Gameplay regression tests passed")
+
+func _test_skill_purchases() -> void:
+	for unit in ["cop", "baseball"]:
+		var points_property := "cop_skill_points" if unit == "cop" else "baseball_skill_points"
+		for id in _skill_ids(unit):
+			_start_game()
+			set(points_property, 100)
+			var cap := int(SKILLS[id].cap)
+			var purchases := cap if cap >= 0 else 20
+			for rank in purchases:
+				var preview := _skill_value(id, 1)
+				assert(_purchase_skill(unit, id))
+				assert(int(get(id)) == rank + 1)
+				assert(is_equal_approx(_skill_value(id), preview))
+				assert(int(get(points_property)) == 99 - rank)
+			if cap >= 0:
+				var points_before := int(get(points_property))
+				assert(not _purchase_skill(unit, id))
+				assert(int(get(points_property)) == points_before)
+			set(points_property, 0)
+			assert(not _purchase_skill(unit, id))
+	_start_game()
+	baseball_damage_skill = 16
+	baseball_cooldown_skill = 6
+	baseball_knockback_skill = 6
+	assert(is_equal_approx(_baseball_damage(), 50.0))
+	assert(is_equal_approx(_baseball_attack_rate(), BASEBALL_ATTACK_RATE * 0.5))
+	var speed_ratio := _baseball_knockback_speed() / BASEBALL_KNOCKBACK_SPEED
+	assert(is_equal_approx(speed_ratio * speed_ratio, 2.0))
+
+func _test_reload_progress() -> void:
+	_start_game()
+	ammo = 0
+	_start_reload()
+	_update_reload(0.6)
+	cop_skill_points = 2
+	var fraction_remaining := reload_time_remaining / _reload_duration()
+	assert(_purchase_skill("cop", "cop_reload_skill"))
+	assert(is_equal_approx(reload_time_remaining / _reload_duration(), fraction_remaining))
+	assert(_purchase_skill("cop", "cop_magazine_skill"))
+	_update_reload(10.0)
+	assert(not is_reloading)
+	assert(ammo == 12)
+	assert(is_zero_approx(reload_time_remaining))
+	_place_survivor(0)
+	survivor_position = _zone_home(0, "cop")
+	survivor_patrol_target = survivor_position + Vector2(40, 0)
+	survivor_patrol_timer = 5.0
+	ammo = 0
+	_start_reload()
+	var position_before := survivor_position
+	_update_survivor(0.1)
+	assert(is_reloading)
+	assert(survivor_position.distance_to(position_before) > 0.0)
+
+func _test_shot_intersections() -> void:
+	assert(is_equal_approx(_ray_zombie_entry(Vector2.ZERO, Vector2.RIGHT, 100.0, Vector2(50, 0)), 27.0))
+	assert(_ray_zombie_entry(Vector2.ZERO, Vector2.RIGHT, 100.0, Vector2(50, 24)) == INF)
+	assert(_ray_zombie_entry(Vector2.ZERO, Vector2.RIGHT, 100.0, Vector2(-30, 0)) == INF)
+	assert(is_equal_approx(_ray_zombie_entry(Vector2.ZERO, Vector2.RIGHT, 100.0, Vector2(110, 0)), 87.0))
+	var glancing := _ray_zombie_entry(Vector2.ZERO, Vector2.RIGHT, 100.0, Vector2(50, 22))
+	var direct := _ray_zombie_entry(Vector2.ZERO, Vector2.RIGHT, 100.0, Vector2(55, 0))
+	assert(direct < glancing)
+
+func _test_selection_gestures() -> void:
+	_start_game()
+	_place_survivor(0)
+	survivor_selected = true
+	pointer_down_position = _map_to_screen(_deployment_zones()[1].get_center())
+	map_gesture_moved = true
+	_handle_map_pointer_up(pointer_down_position)
+	assert(survivor_spawn == 0)
+	assert(survivor_selected)
+	game_paused = true
+	active_touches[0] = Vector2.ONE
+	_open_skill_tree("cop")
+	assert(active_touches.is_empty())
+	_close_skill_tree()
+	assert(game_paused)
+	game_paused = false
+	_open_skill_tree("cop")
+	_close_skill_tree()
+	assert(not game_paused)
 
 func _make_label(font_size: int, color: Color) -> Label:
 	var label := Label.new()
@@ -364,6 +469,7 @@ func _process(delta: float) -> void:
 	_update_baseball_survivor(delta)
 	_separate_survivors_and_zombies()
 	_separate_survivors()
+	_keep_zombies_out_of_obstacles()
 
 	for shot in shots.duplicate():
 		shot.life -= delta
@@ -518,7 +624,7 @@ func _steer_zombie_forward(
 ) -> Vector2:
 	# Ask obstacle navigation which direction is currently clear, turn toward
 	# that direction, then move strictly forward along the zombie's facing.
-	var navigation_step := _move_around_car(current, target, maxf(1.0, speed * delta))
+	var navigation_step := _move_around_obstacles(current, target, maxf(1.0, speed * delta))
 	if navigation_step.distance_to(current) > 0.001:
 		var desired_angle := current.angle_to_point(navigation_step)
 		zombie.aim_angle = rotate_toward(zombie.aim_angle, desired_angle, ZOMBIE_TURN_SPEED * delta)
@@ -663,20 +769,15 @@ func _update_survivor(delta: float) -> void:
 		var retreat_angle := survivor_position.angle_to_point(survivor_target)
 		survivor_aim_angle = rotate_toward(survivor_aim_angle, retreat_angle, SURVIVOR_TURN_SPEED * delta)
 		var retreat_speed := _survivor_travel_speed(survivor_position, SURVIVOR_SPEED)
-		survivor_position = _move_around_car(survivor_position, survivor_target, retreat_speed * delta)
+		survivor_position = _move_around_obstacles(survivor_position, survivor_target, retreat_speed * delta)
 		if survivor_position.distance_to(survivor_target) <= 1.0:
 			survivor_evacuated = true
 			survivor_is_walking = false
 			_clear_zombie_target("cop")
 		return
 
-	if is_reloading:
-		reload_time_remaining -= delta
-		if reload_time_remaining <= 0.0:
-			is_reloading = false
-			ammo = _magazine_size()
-		else:
-			return
+	fire_cooldown = maxf(0.0, fire_cooldown - delta)
+	_update_reload(delta)
 
 	var zone := _deployment_zones()[survivor_spawn]
 	var safe_zone := zone.grow(-SURVIVOR_COLLISION_RADIUS)
@@ -694,7 +795,6 @@ func _update_survivor(delta: float) -> void:
 	# are not an immediate threat.
 	if ammo <= 0 or (ammo <= EARLY_RELOAD_AT and not zombie_in_awareness):
 		_start_reload()
-		return
 
 	if not zone.has_point(survivor_position):
 		# Finish the assignment before beginning local patrol behavior.
@@ -724,17 +824,15 @@ func _update_survivor(delta: float) -> void:
 		var walk_angle := survivor_position.angle_to_point(survivor_target)
 		survivor_aim_angle = rotate_toward(survivor_aim_angle, walk_angle, SURVIVOR_TURN_SPEED * delta)
 
-	if zombie_in_range:
-		fire_cooldown -= delta
-		if fire_cooldown <= 0.0:
-			_shoot(target)
+	if zombie_in_range and fire_cooldown <= 0.0:
+		_shoot(target)
 
 	var distance_to_destination := survivor_position.distance_to(survivor_target)
 	if distance_to_destination > 4.0:
 		survivor_is_walking = true
 		var base_speed := SURVIVOR_SPEED if not zone.has_point(survivor_position) else SURVIVOR_COMBAT_SPEED
 		var travel_speed := _survivor_travel_speed(survivor_position, base_speed)
-		survivor_position = _move_around_car(survivor_position, survivor_target, travel_speed * delta)
+		survivor_position = _move_around_obstacles(survivor_position, survivor_target, travel_speed * delta)
 	else:
 		survivor_is_walking = false
 
@@ -788,7 +886,7 @@ func _update_baseball_survivor(delta: float) -> void:
 		var retreat_angle := baseball_position.angle_to_point(baseball_target)
 		baseball_aim_angle = rotate_toward(baseball_aim_angle, retreat_angle, SURVIVOR_TURN_SPEED * delta)
 		var retreat_speed := _survivor_travel_speed(baseball_position, BASEBALL_SPEED)
-		baseball_position = _move_around_car(baseball_position, baseball_target, retreat_speed * delta)
+		baseball_position = _move_around_obstacles(baseball_position, baseball_target, retreat_speed * delta)
 		if baseball_position.distance_to(baseball_target) <= 1.0:
 			baseball_evacuated = true
 			baseball_is_walking = false
@@ -812,7 +910,7 @@ func _update_baseball_survivor(delta: float) -> void:
 		baseball_aim_angle = rotate_toward(baseball_aim_angle, transfer_angle, SURVIVOR_TURN_SPEED * delta)
 		baseball_is_walking = true
 		var transfer_speed := _survivor_travel_speed(baseball_position, BASEBALL_SPEED)
-		baseball_position = _move_around_car(baseball_position, baseball_target, transfer_speed * delta)
+		baseball_position = _move_around_obstacles(baseball_position, baseball_target, transfer_speed * delta)
 		return
 
 	baseball_zone_move = false
@@ -832,7 +930,7 @@ func _update_baseball_survivor(delta: float) -> void:
 			var next_position := baseball_position + retreat_direction * BASEBALL_RECHARGE_SPEED * delta
 			if _point_in_deployment_zone(next_position, baseball_spawn):
 				baseball_is_walking = true
-				baseball_position = _move_around_car(baseball_position, next_position, BASEBALL_RECHARGE_SPEED * delta)
+				baseball_position = _move_around_obstacles(baseball_position, next_position, BASEBALL_RECHARGE_SPEED * delta)
 			else:
 				baseball_is_walking = false
 		return
@@ -850,7 +948,7 @@ func _update_baseball_survivor(delta: float) -> void:
 				var retreat_direction := target_position.direction_to(baseball_position)
 				var next_position := baseball_position + retreat_direction * BASEBALL_RECHARGE_SPEED * delta
 				if _point_in_deployment_zone(next_position, baseball_spawn):
-					baseball_position = _move_around_car(baseball_position, next_position, BASEBALL_RECHARGE_SPEED * delta)
+					baseball_position = _move_around_obstacles(baseball_position, next_position, BASEBALL_RECHARGE_SPEED * delta)
 			else:
 				baseball_is_walking = false
 		elif distance <= BASEBALL_MELEE_METERS * TILE_SIZE:
@@ -859,7 +957,7 @@ func _update_baseball_survivor(delta: float) -> void:
 		else:
 			baseball_is_walking = true
 			var chase_speed := _survivor_travel_speed(baseball_position, BASEBALL_SPEED)
-			baseball_position = _move_around_car(baseball_position, target_position, chase_speed * delta)
+			baseball_position = _move_around_obstacles(baseball_position, target_position, chase_speed * delta)
 	else:
 		var nearest_zombie := _closest_zombie_to_baseball()
 		var zombie_near_zone := false
@@ -880,7 +978,7 @@ func _update_baseball_survivor(delta: float) -> void:
 			baseball_is_walking = true
 			var patrol_angle := baseball_position.angle_to_point(baseball_target)
 			baseball_aim_angle = rotate_toward(baseball_aim_angle, patrol_angle, SURVIVOR_TURN_SPEED * delta)
-			baseball_position = _move_around_car(baseball_position, baseball_target, BASEBALL_RECHARGE_SPEED * delta)
+			baseball_position = _move_around_obstacles(baseball_position, baseball_target, BASEBALL_RECHARGE_SPEED * delta)
 		else:
 			baseball_is_walking = false
 
@@ -980,7 +1078,7 @@ func _segment_intersects_rect(from: Vector2, to: Vector2, rect: Rect2) -> bool:
 		or Geometry2D.segment_intersects_segment(from, to, bottom_left, top_left) != null
 	)
 
-func _move_around_car(current: Vector2, target: Vector2, distance: float) -> Vector2:
+func _move_around_obstacles(current: Vector2, target: Vector2, distance: float) -> Vector2:
 	# Route around whichever solid obstacle is encountered first. Keeping this
 	# in the shared movement helper makes both survivors respect the house.
 	var obstacles := _car_obstacle_rects(30.0)
@@ -1132,29 +1230,23 @@ func _swing_bat(target: Dictionary) -> void:
 			baseball_kills += 1
 			_award_baseball_xp()
 
-	# The impact can also draw nearby, untargeted zombies toward the batter.
-	var hearing_range := GUNSHOT_HEARING_RANGE_METERS * TILE_SIZE
-	for zombie in zombies:
-		if String(zombie.target_id) != "":
-			continue
-		if _zombie_position(zombie).distance_to(baseball_position) <= hearing_range:
-			if randf() <= GUNSHOT_RETARGET_CHANCE:
-				zombie.target_id = "baseball"
+	_attract_zombies_to_sound("baseball", baseball_position)
 
 func _baseball_damage() -> float:
-	return minf(50.0, 10.0 + baseball_damage_skill * 2.5)
+	return _skill_value("baseball_damage_skill")
 
 func _baseball_attack_rate() -> float:
-	return maxf(BASEBALL_ATTACK_RATE * 0.5, BASEBALL_ATTACK_RATE - baseball_cooldown_skill * 0.125)
+	return _skill_value("baseball_cooldown_skill")
 
 func _baseball_knockback_speed() -> float:
-	return minf(BASEBALL_KNOCKBACK_SPEED * 2.0, BASEBALL_KNOCKBACK_SPEED + baseball_knockback_skill * 70.0)
+	# With constant deceleration, stopping distance is proportional to speed squared.
+	return BASEBALL_KNOCKBACK_SPEED * sqrt(_skill_value("baseball_knockback_skill"))
 
 func _magazine_size() -> int:
-	return MAGAZINE_SIZE + cop_magazine_skill * 2
+	return int(_skill_value("cop_magazine_skill"))
 
 func _reload_duration() -> float:
-	return maxf(RELOAD_TIME * 0.5, RELOAD_TIME - cop_reload_skill * 0.15)
+	return _skill_value("cop_reload_skill")
 
 func _closest_zombie() -> Dictionary:
 	var closest: Dictionary = {}
@@ -1165,6 +1257,27 @@ func _closest_zombie() -> Dictionary:
 			closest = zombie
 			closest_distance = distance
 	return closest
+
+func _update_reload(delta: float) -> void:
+	if not is_reloading:
+		return
+	reload_time_remaining = maxf(0.0, reload_time_remaining - delta)
+	if reload_time_remaining <= 0.0:
+		is_reloading = false
+		ammo = _magazine_size()
+
+func _ray_zombie_entry(origin: Vector2, direction: Vector2, length: float, center: Vector2) -> float:
+	var offset := center - origin
+	var projection := offset.dot(direction)
+	var perpendicular_squared := maxf(0.0, offset.length_squared() - projection * projection)
+	var radius_squared := ZOMBIE_HIT_RADIUS * ZOMBIE_HIT_RADIUS
+	if perpendicular_squared > radius_squared:
+		return INF
+	var half_chord := sqrt(radius_squared - perpendicular_squared)
+	var entry := maxf(0.0, projection - half_chord)
+	if projection + half_chord < 0.0 or entry > length:
+		return INF
+	return entry
 
 func _start_reload() -> void:
 	if is_reloading or ammo >= _magazine_size():
@@ -1186,15 +1299,10 @@ func _shoot(target: Dictionary) -> void:
 
 	# Find the first zombie whose body intersects the finite shot ray.
 	for zombie in zombies:
-		var offset := _zombie_position(zombie) - survivor_position
-		var distance_along_ray := offset.dot(shot_direction)
-		if distance_along_ray < 0.0 or distance_along_ray > ray_length:
-			continue
-		var closest_point := survivor_position + shot_direction * distance_along_ray
-		if closest_point.distance_to(_zombie_position(zombie)) <= ZOMBIE_HIT_RADIUS:
-			if distance_along_ray < hit_distance:
-				hit_distance = distance_along_ray
-				hit_zombie = zombie
+		var entry := _ray_zombie_entry(survivor_position, shot_direction, ray_length, _zombie_position(zombie))
+		if entry < hit_distance:
+			hit_distance = entry
+			hit_zombie = zombie
 
 	var impact_position := ray_end
 	if not hit_zombie.is_empty():
@@ -1216,8 +1324,9 @@ func _shoot(target: Dictionary) -> void:
 			hit_zombie.target_id = "cop"
 		var knockback_direction := survivor_position.direction_to(zombie_position)
 		var knocked_position := zombie_position + knockback_direction * ZOMBIE_HIT_KNOCKBACK
-		hit_zombie.x = knocked_position.x / _map_size().x
-		hit_zombie.y = knocked_position.y
+		if not _zombie_position_blocked(knocked_position):
+			hit_zombie.x = knocked_position.x / _map_size().x
+			hit_zombie.y = knocked_position.y
 		hit_zombie.movement_factor = 0.08
 		var shot_damage := _cop_damage()
 		if randf() < _cop_crit_chance():
@@ -1229,26 +1338,28 @@ func _shoot(target: Dictionary) -> void:
 			cop_kills += 1
 			_award_cop_xp()
 
-	# Nearby untargeted zombies can react to the sound even when the shot misses.
+	_attract_zombies_to_sound("cop", survivor_position)
+
+func _attract_zombies_to_sound(unit: String, origin: Vector2) -> void:
 	var hearing_range := GUNSHOT_HEARING_RANGE_METERS * TILE_SIZE
 	for zombie in zombies:
-		if zombie == hit_zombie or String(zombie.target_id) != "":
+		if String(zombie.target_id) != "":
 			continue
-		if _zombie_position(zombie).distance_to(survivor_position) <= hearing_range:
+		if _zombie_position(zombie).distance_to(origin) <= hearing_range:
 			if randf() <= GUNSHOT_RETARGET_CHANCE:
-				zombie.target_id = "cop"
+				zombie.target_id = unit
 
 func _cop_accuracy() -> float:
 	return COP_ACCURACY
 
 func _cop_damage() -> float:
-	return 20.0 + cop_damage_skill * 5.0
+	return _skill_value("cop_damage_skill")
 
 func _cop_crit_chance() -> float:
-	return minf(0.90, 0.10 + cop_crit_skill * 0.10)
+	return _skill_value("cop_crit_skill")
 
 func _cop_range_meters() -> float:
-	return minf(SURVIVOR_RANGE_METERS * 2.0, SURVIVOR_RANGE_METERS + cop_range_skill)
+	return _skill_value("cop_range_skill")
 
 func _award_cop_xp() -> void:
 	cop_xp += 1
@@ -1335,6 +1446,9 @@ func _start_game() -> void:
 	reload_time_remaining = 0.0
 	is_reloading = false
 	survivor_aim_angle = PI
+	survivor_position = Vector2.ZERO
+	survivor_target = Vector2.ZERO
+	survivor_is_walking = false
 	survivor_patrol_target = Vector2.ZERO
 	survivor_patrol_timer = 0.0
 	survivor_retreating = false
@@ -1345,6 +1459,8 @@ func _start_game() -> void:
 	map_zoom = 1.0
 	map_offset = _centered_map_offset()
 	map_dragging = false
+	map_gesture_moved = false
+	pinch_distance = 0.0
 	active_touches.clear()
 	game_paused = false
 	fast_forward = false
@@ -1406,6 +1522,7 @@ func _input(event: InputEvent) -> void:
 	if screen != "playing":
 		return
 	if skill_tree_open:
+		get_viewport().set_input_as_handled()
 		if event is InputEventScreenTouch and event.pressed:
 			_handle_skill_tree_pointer(event.position)
 		elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
@@ -1420,12 +1537,14 @@ func _input(event: InputEvent) -> void:
 			active_touches[event.index] = event.position
 			if active_touches.size() == 1:
 				pointer_down_position = event.position
+				map_gesture_moved = false
 				map_dragging = not _handle_pointer_down(event.position)
 				map_drag_position = event.position
 			elif active_touches.size() == 2:
 				map_dragging = false
 				dragging_survivor = false
 				dragging_unit = ""
+				map_gesture_moved = true
 				pinch_distance = _touch_distance()
 		else:
 			if active_touches.size() == 1:
@@ -1461,6 +1580,7 @@ func _input(event: InputEvent) -> void:
 		elif event.button_index == MOUSE_BUTTON_LEFT:
 			if event.pressed:
 				pointer_down_position = event.position
+				map_gesture_moved = false
 				map_dragging = not _handle_pointer_down(event.position)
 				map_drag_position = event.position
 			else:
@@ -1492,6 +1612,8 @@ func _zoom_at(screen_position: Vector2, new_zoom: float) -> void:
 	queue_redraw()
 
 func _pan_map(delta: Vector2) -> void:
+	if (map_drag_position + delta).distance_to(pointer_down_position) > 10.0:
+		map_gesture_moved = true
 	var bounds := _map_offset_bounds()
 	var adjusted := delta
 	if (map_offset.x > bounds.max_x and delta.x > 0.0) or (map_offset.x < bounds.min_x and delta.x < 0.0):
@@ -1593,12 +1715,14 @@ func _handle_pointer_down(position: Vector2) -> bool:
 		pointer_down_position = position
 		queue_redraw()
 		return true
+	if (survivor_selected or baseball_selected) and _profile_panel_rect().has_point(position):
+		return true
 	# Map taps are resolved on release. This lets a selected survivor coexist
 	# with a pan gesture without assigning the zone touched at drag start.
 	return false
 
 func _handle_map_pointer_up(position: Vector2) -> void:
-	if pointer_down_position.distance_to(position) > 10.0:
+	if map_gesture_moved or pointer_down_position.distance_to(position) > 10.0:
 		return
 	if not survivor_selected and not baseball_selected:
 		return
@@ -1949,7 +2073,7 @@ func _draw() -> void:
 	draw_rect(cop_card, cop_card_color)
 	draw_rect(cop_card, Color("#9fba9e"), false, 2)
 	draw_texture_rect(SURVIVOR_TEXTURE, Rect2(cop_card.position + Vector2(23, 5), Vector2(58, 49)), false, cop_card_tint)
-	draw_string(ThemeDB.fallback_font, cop_card.position + Vector2(10, 78), "COP • 5m", HORIZONTAL_ALIGNMENT_CENTER, 84, 13, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, cop_card.position + Vector2(10, 78), "COP • %dm" % int(_cop_range_meters()), HORIZONTAL_ALIGNMENT_CENTER, 84, 13, Color.WHITE)
 
 	var batter_card := _baseball_card_rect()
 	var batter_card_color := Color("#7188a4") if baseball_selected else Color("#35465a")
@@ -2118,6 +2242,10 @@ func _skill_tree_node_rect(index: int) -> Rect2:
 	)
 
 func _open_skill_tree(unit: String) -> void:
+	active_touches.clear()
+	map_dragging = false
+	dragging_survivor = false
+	dragging_unit = ""
 	skill_tree_open = true
 	skill_tree_unit = unit
 	skill_tree_was_paused = game_paused
@@ -2136,45 +2264,56 @@ func _close_skill_tree() -> void:
 	pause_button.text = "PLAY" if game_paused else "PAUSE"
 	queue_redraw()
 
+func _skill_ids(unit: String) -> Array:
+	return COP_SKILLS if unit == "cop" else BASEBALL_SKILLS
+
+func _skill_value(id: String, extra_rank: int = 0) -> float:
+	var definition: Dictionary = SKILLS[id]
+	var rank := maxi(0, int(get(id)) + extra_rank)
+	var cap := int(definition.cap)
+	if cap >= 0:
+		rank = mini(rank, cap)
+	return float(definition.base) + float(definition.step) * rank
+
+func _skill_is_maxed(id: String) -> bool:
+	var cap := int(SKILLS[id].cap)
+	return cap >= 0 and int(get(id)) >= cap
+
+func _purchase_skill(unit: String, id: String) -> bool:
+	if not _skill_ids(unit).has(id):
+		return false
+	var points_property := "cop_skill_points" if unit == "cop" else "baseball_skill_points"
+	var points := int(get(points_property))
+	if points <= 0 or _skill_is_maxed(id):
+		return false
+	var previous_capacity := _magazine_size()
+	var previous_reload := _reload_duration()
+	set(id, int(get(id)) + 1)
+	set(points_property, points - 1)
+	ammo += _magazine_size() - previous_capacity
+	if is_reloading:
+		reload_time_remaining *= _reload_duration() / previous_reload
+	return true
+
+func _skill_preview(id: String) -> String:
+	var definition: Dictionary = SKILLS[id]
+	var scale := float(definition.get("scale", 1.0))
+	var current := String(definition.format) % (_skill_value(id) * scale)
+	if _skill_is_maxed(id):
+		return current + " • MAX"
+	var upgraded := String(definition.format) % (_skill_value(id, 1) * scale)
+	return current + " → " + upgraded
+
 func _handle_skill_tree_pointer(position: Vector2) -> void:
 	if _skill_tree_close_rect().has_point(position):
 		_close_skill_tree()
 		return
-	var node := -1
-	var node_count := 5 if skill_tree_unit == "cop" else 3
-	for i in node_count:
-		if _skill_tree_node_rect(i).has_point(position):
-			node = i
-			break
-	if node < 0:
-		return
-
-	if skill_tree_unit == "cop" and cop_skill_points > 0:
-		if node == 0:
-			cop_damage_skill += 1
-		elif node == 1 and cop_crit_skill < 8:
-			cop_crit_skill += 1
-		elif node == 2 and cop_range_skill < int(SURVIVOR_RANGE_METERS):
-			cop_range_skill += 1
-		elif node == 3 and cop_reload_skill < 6:
-			cop_reload_skill += 1
-		elif node == 4 and cop_magazine_skill < 5:
-			cop_magazine_skill += 1
-			ammo += 2
-		else:
+	var ids := _skill_ids(skill_tree_unit)
+	for index in ids.size():
+		if _skill_tree_node_rect(index).has_point(position):
+			_purchase_skill(skill_tree_unit, String(ids[index]))
+			queue_redraw()
 			return
-		cop_skill_points -= 1
-	elif skill_tree_unit == "baseball" and baseball_skill_points > 0:
-		if node == 0 and baseball_damage_skill < 16:
-			baseball_damage_skill += 1
-		elif node == 1 and baseball_cooldown_skill < 6:
-			baseball_cooldown_skill += 1
-		elif node == 2 and baseball_knockback_skill < 6:
-			baseball_knockback_skill += 1
-		else:
-			return
-		baseball_skill_points -= 1
-	queue_redraw()
 
 func _draw_skill_tree() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), Color(0.0, 0.0, 0.0, 0.68))
@@ -2191,41 +2330,15 @@ func _draw_skill_tree() -> void:
 	var points := cop_skill_points if skill_tree_unit == "cop" else baseball_skill_points
 	draw_string(ThemeDB.fallback_font, panel.position + Vector2(24, 42), title, HORIZONTAL_ALIGNMENT_LEFT, panel.size.x - 90.0, 24, Color.WHITE)
 	draw_string(ThemeDB.fallback_font, panel.position + Vector2(24, 78), "SKILL POINTS: %d" % points, HORIZONTAL_ALIGNMENT_LEFT, panel.size.x - 48.0, 18, Color("#ffd84a"))
-	var node_count := 5 if skill_tree_unit == "cop" else 3
-	for i in node_count:
-		var node_rect := _skill_tree_node_rect(i)
-		draw_rect(node_rect, Color("#26343c"))
+	var ids := _skill_ids(skill_tree_unit)
+	for index in ids.size():
+		var id := String(ids[index])
+		var node_rect := _skill_tree_node_rect(index)
+		var available := points > 0 and not _skill_is_maxed(id)
+		draw_rect(node_rect, Color("#26343c") if available else Color("#202529"))
 		draw_rect(node_rect, accent, false, 2.0)
-		var label := ""
-		var detail := ""
-		if skill_tree_unit == "cop":
-			if i == 0:
-				label = "STOPPING POWER"
-				detail = "DAMAGE: %d → %d" % [int(_cop_damage()), int(_cop_damage() + 5.0)]
-			elif i == 1:
-				label = "CRITICAL CHANCE"
-				detail = "CRIT: 90% • MAX" if cop_crit_skill >= 8 else "CRIT: %d%% → %d%%" % [int(_cop_crit_chance() * 100.0), int((_cop_crit_chance() + 0.10) * 100.0)]
-			elif i == 2:
-				label = "ENGAGEMENT RANGE"
-				detail = "RANGE: %dm • MAX" % int(_cop_range_meters()) if cop_range_skill >= int(SURVIVOR_RANGE_METERS) else "RANGE: %dm → %dm" % [int(_cop_range_meters()), int(_cop_range_meters() + 1.0)]
-			elif i == 3:
-				label = "QUICK RELOAD"
-				detail = "RELOAD: %.2fs • MAX" % _reload_duration() if cop_reload_skill >= 6 else "RELOAD: %.2fs → %.2fs" % [_reload_duration(), _reload_duration() - 0.15]
-			else:
-				label = "EXTENDED MAGAZINE"
-				detail = "MAGAZINE: %d • MAX" % _magazine_size() if cop_magazine_skill >= 5 else "MAGAZINE: %d → %d" % [_magazine_size(), _magazine_size() + 2]
-		else:
-			if i == 0:
-				label = "POWER SWING"
-				detail = "DAMAGE: 50 • MAX" if baseball_damage_skill >= 16 else "DAMAGE: %.1f → %.1f" % [_baseball_damage(), _baseball_damage() + 2.5]
-			elif i == 1:
-				label = "QUICK RECOVERY"
-				detail = "COOLDOWN: %.2fs • MAX" % _baseball_attack_rate() if baseball_cooldown_skill >= 6 else "COOLDOWN: %.2fs → %.2fs" % [_baseball_attack_rate(), _baseball_attack_rate() - 0.125]
-			else:
-				label = "HEAVY KNOCKBACK"
-				detail = "KNOCKBACK: %d • MAX" % int(_baseball_knockback_speed()) if baseball_knockback_skill >= 6 else "KNOCKBACK: %d → %d" % [int(_baseball_knockback_speed()), int(_baseball_knockback_speed() + 70.0)]
-		draw_string(ThemeDB.fallback_font, node_rect.position + Vector2(14, 21), label, HORIZONTAL_ALIGNMENT_LEFT, node_rect.size.x - 28.0, 16, Color.WHITE)
-		draw_string(ThemeDB.fallback_font, node_rect.position + Vector2(14, 43), detail, HORIZONTAL_ALIGNMENT_LEFT, node_rect.size.x - 28.0, 14, accent)
+		draw_string(ThemeDB.fallback_font, node_rect.position + Vector2(14, 21), String(SKILLS[id].label), HORIZONTAL_ALIGNMENT_LEFT, node_rect.size.x - 28.0, 16, Color.WHITE)
+		draw_string(ThemeDB.fallback_font, node_rect.position + Vector2(14, 43), _skill_preview(id), HORIZONTAL_ALIGNMENT_LEFT, node_rect.size.x - 28.0, 14, accent)
 
 func _survivor_info_close_rect() -> Rect2:
 	var panel := _profile_panel_rect()
