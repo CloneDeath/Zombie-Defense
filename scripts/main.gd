@@ -97,6 +97,8 @@ var cop_skill_star := false
 var cop_damage_skill := 0
 var cop_crit_skill := 0
 var cop_range_skill := 0
+var cop_reload_skill := 0
+var cop_magazine_skill := 0
 var baseball_spawn := -1
 var baseball_max_health := BASEBALL_MAX_HEALTH
 var baseball_level := 1
@@ -120,7 +122,8 @@ var baseball_kills := 0
 var baseball_skill_points := 0
 var baseball_skill_star := false
 var baseball_damage_skill := 0
-var baseball_health_skill := 0
+var baseball_cooldown_skill := 0
+var baseball_knockback_skill := 0
 var skill_tree_open := false
 var skill_tree_unit := ""
 var skill_tree_was_paused := false
@@ -671,7 +674,7 @@ func _update_survivor(delta: float) -> void:
 		reload_time_remaining -= delta
 		if reload_time_remaining <= 0.0:
 			is_reloading = false
-			ammo = MAGAZINE_SIZE
+			ammo = _magazine_size()
 		else:
 			return
 
@@ -1101,7 +1104,7 @@ func _closest_zombie_in_baseball_roam() -> Dictionary:
 func _swing_bat(target: Dictionary) -> void:
 	if target.is_empty() or not zombies.has(target):
 		return
-	baseball_attack_cooldown = BASEBALL_ATTACK_RATE
+	baseball_attack_cooldown = _baseball_attack_rate()
 	baseball_swing_time = BASEBALL_SWING_DURATION
 	var hit_zombies: Array[Dictionary] = []
 	for zombie in zombies:
@@ -1113,7 +1116,7 @@ func _swing_bat(target: Dictionary) -> void:
 		if String(zombie.target_id) == "":
 			zombie.target_id = "baseball"
 		var knockback_direction := baseball_position.direction_to(target_position)
-		zombie.knockback_velocity = knockback_direction * BASEBALL_KNOCKBACK_SPEED
+		zombie.knockback_velocity = knockback_direction * _baseball_knockback_speed()
 		zombie.movement_factor = 0.02
 		zombie.hp -= _baseball_damage()
 		for i in 4:
@@ -1139,7 +1142,19 @@ func _swing_bat(target: Dictionary) -> void:
 				zombie.target_id = "baseball"
 
 func _baseball_damage() -> float:
-	return BASEBALL_DAMAGE + (baseball_level - 1) * BASEBALL_DAMAGE_PER_LEVEL + baseball_damage_skill * 0.5
+	return minf(50.0, 10.0 + baseball_damage_skill * 2.5)
+
+func _baseball_attack_rate() -> float:
+	return maxf(BASEBALL_ATTACK_RATE * 0.5, BASEBALL_ATTACK_RATE - baseball_cooldown_skill * 0.125)
+
+func _baseball_knockback_speed() -> float:
+	return minf(BASEBALL_KNOCKBACK_SPEED * 2.0, BASEBALL_KNOCKBACK_SPEED + baseball_knockback_skill * 70.0)
+
+func _magazine_size() -> int:
+	return MAGAZINE_SIZE + cop_magazine_skill * 2
+
+func _reload_duration() -> float:
+	return maxf(RELOAD_TIME * 0.5, RELOAD_TIME - cop_reload_skill * 0.15)
 
 func _closest_zombie() -> Dictionary:
 	var closest: Dictionary = {}
@@ -1152,10 +1167,10 @@ func _closest_zombie() -> Dictionary:
 	return closest
 
 func _start_reload() -> void:
-	if is_reloading or ammo >= MAGAZINE_SIZE:
+	if is_reloading or ammo >= _magazine_size():
 		return
 	is_reloading = true
-	reload_time_remaining = RELOAD_TIME
+	reload_time_remaining = _reload_duration()
 
 func _shoot(target: Dictionary) -> void:
 	if target.is_empty() or not zombies.has(target) or is_reloading or ammo <= 0:
@@ -1281,6 +1296,8 @@ func _start_game() -> void:
 	cop_damage_skill = 0
 	cop_crit_skill = 0
 	cop_range_skill = 0
+	cop_reload_skill = 0
+	cop_magazine_skill = 0
 	baseball_spawn = -1
 	baseball_max_health = BASEBALL_MAX_HEALTH
 	baseball_level = 1
@@ -1304,7 +1321,8 @@ func _start_game() -> void:
 	baseball_skill_points = 0
 	baseball_skill_star = false
 	baseball_damage_skill = 0
-	baseball_health_skill = 0
+	baseball_cooldown_skill = 0
+	baseball_knockback_skill = 0
 	skill_tree_open = false
 	skill_tree_unit = ""
 	dragging_unit = ""
@@ -1313,7 +1331,7 @@ func _start_game() -> void:
 	survivor_selected = false
 	dragging_survivor = false
 	fire_cooldown = 0.0
-	ammo = MAGAZINE_SIZE
+	ammo = _magazine_size()
 	reload_time_remaining = 0.0
 	is_reloading = false
 	survivor_aim_angle = PI
@@ -2095,8 +2113,8 @@ func _skill_tree_close_rect() -> Rect2:
 func _skill_tree_node_rect(index: int) -> Rect2:
 	var panel := _skill_tree_panel_rect()
 	return Rect2(
-		Vector2(panel.position.x + 30.0, panel.position.y + 110.0 + index * 90.0),
-		Vector2(panel.size.x - 60.0, 72.0)
+		Vector2(panel.position.x + 30.0, panel.position.y + 96.0 + index * 61.0),
+		Vector2(panel.size.x - 60.0, 55.0)
 	)
 
 func _open_skill_tree(unit: String) -> void:
@@ -2123,7 +2141,7 @@ func _handle_skill_tree_pointer(position: Vector2) -> void:
 		_close_skill_tree()
 		return
 	var node := -1
-	var node_count := 3 if skill_tree_unit == "cop" else 2
+	var node_count := 5 if skill_tree_unit == "cop" else 3
 	for i in node_count:
 		if _skill_tree_node_rect(i).has_point(position):
 			node = i
@@ -2138,17 +2156,24 @@ func _handle_skill_tree_pointer(position: Vector2) -> void:
 			cop_crit_skill += 1
 		elif node == 2 and cop_range_skill < int(SURVIVOR_RANGE_METERS):
 			cop_range_skill += 1
+		elif node == 3 and cop_reload_skill < 6:
+			cop_reload_skill += 1
+		elif node == 4 and cop_magazine_skill < 5:
+			cop_magazine_skill += 1
+			ammo += 2
 		else:
 			return
 		cop_skill_points -= 1
 	elif skill_tree_unit == "baseball" and baseball_skill_points > 0:
-		baseball_skill_points -= 1
-		if node == 0:
+		if node == 0 and baseball_damage_skill < 16:
 			baseball_damage_skill += 1
+		elif node == 1 and baseball_cooldown_skill < 6:
+			baseball_cooldown_skill += 1
+		elif node == 2 and baseball_knockback_skill < 6:
+			baseball_knockback_skill += 1
 		else:
-			baseball_health_skill += 1
-			baseball_max_health += 2
-			baseball_health += 2
+			return
+		baseball_skill_points -= 1
 	queue_redraw()
 
 func _draw_skill_tree() -> void:
@@ -2166,7 +2191,7 @@ func _draw_skill_tree() -> void:
 	var points := cop_skill_points if skill_tree_unit == "cop" else baseball_skill_points
 	draw_string(ThemeDB.fallback_font, panel.position + Vector2(24, 42), title, HORIZONTAL_ALIGNMENT_LEFT, panel.size.x - 90.0, 24, Color.WHITE)
 	draw_string(ThemeDB.fallback_font, panel.position + Vector2(24, 78), "SKILL POINTS: %d" % points, HORIZONTAL_ALIGNMENT_LEFT, panel.size.x - 48.0, 18, Color("#ffd84a"))
-	var node_count := 3 if skill_tree_unit == "cop" else 2
+	var node_count := 5 if skill_tree_unit == "cop" else 3
 	for i in node_count:
 		var node_rect := _skill_tree_node_rect(i)
 		draw_rect(node_rect, Color("#26343c"))
@@ -2179,25 +2204,28 @@ func _draw_skill_tree() -> void:
 				detail = "DAMAGE: %d → %d" % [int(_cop_damage()), int(_cop_damage() + 5.0)]
 			elif i == 1:
 				label = "CRITICAL CHANCE"
-				if cop_crit_skill >= 8:
-					detail = "CRIT: 90% • MAX"
-				else:
-					detail = "CRIT: %d%% → %d%%" % [int(_cop_crit_chance() * 100.0), int((_cop_crit_chance() + 0.10) * 100.0)]
-			else:
+				detail = "CRIT: 90% • MAX" if cop_crit_skill >= 8 else "CRIT: %d%% → %d%%" % [int(_cop_crit_chance() * 100.0), int((_cop_crit_chance() + 0.10) * 100.0)]
+			elif i == 2:
 				label = "ENGAGEMENT RANGE"
-				if cop_range_skill >= int(SURVIVOR_RANGE_METERS):
-					detail = "RANGE: %dm • MAX" % int(_cop_range_meters())
-				else:
-					detail = "RANGE: %dm → %dm" % [int(_cop_range_meters()), int(_cop_range_meters() + 1.0)]
+				detail = "RANGE: %dm • MAX" % int(_cop_range_meters()) if cop_range_skill >= int(SURVIVOR_RANGE_METERS) else "RANGE: %dm → %dm" % [int(_cop_range_meters()), int(_cop_range_meters() + 1.0)]
+			elif i == 3:
+				label = "QUICK RELOAD"
+				detail = "RELOAD: %.2fs • MAX" % _reload_duration() if cop_reload_skill >= 6 else "RELOAD: %.2fs → %.2fs" % [_reload_duration(), _reload_duration() - 0.15]
+			else:
+				label = "EXTENDED MAGAZINE"
+				detail = "MAGAZINE: %d • MAX" % _magazine_size() if cop_magazine_skill >= 5 else "MAGAZINE: %d → %d" % [_magazine_size(), _magazine_size() + 2]
 		else:
 			if i == 0:
 				label = "POWER SWING"
-				detail = "DAMAGE: %.2f → %.2f" % [_baseball_damage(), _baseball_damage() + 0.5]
+				detail = "DAMAGE: 50 • MAX" if baseball_damage_skill >= 16 else "DAMAGE: %.1f → %.1f" % [_baseball_damage(), _baseball_damage() + 2.5]
+			elif i == 1:
+				label = "QUICK RECOVERY"
+				detail = "COOLDOWN: %.2fs • MAX" % _baseball_attack_rate() if baseball_cooldown_skill >= 6 else "COOLDOWN: %.2fs → %.2fs" % [_baseball_attack_rate(), _baseball_attack_rate() - 0.125]
 			else:
-				label = "TOUGHNESS"
-				detail = "MAX HEALTH: %d → %d" % [baseball_max_health, baseball_max_health + 2]
-		draw_string(ThemeDB.fallback_font, node_rect.position + Vector2(18, 28), label, HORIZONTAL_ALIGNMENT_LEFT, node_rect.size.x - 36.0, 19, Color.WHITE)
-		draw_string(ThemeDB.fallback_font, node_rect.position + Vector2(18, 54), detail, HORIZONTAL_ALIGNMENT_LEFT, node_rect.size.x - 36.0, 16, accent)
+				label = "HEAVY KNOCKBACK"
+				detail = "KNOCKBACK: %d • MAX" % int(_baseball_knockback_speed()) if baseball_knockback_skill >= 6 else "KNOCKBACK: %d → %d" % [int(_baseball_knockback_speed()), int(_baseball_knockback_speed() + 70.0)]
+		draw_string(ThemeDB.fallback_font, node_rect.position + Vector2(14, 21), label, HORIZONTAL_ALIGNMENT_LEFT, node_rect.size.x - 28.0, 16, Color.WHITE)
+		draw_string(ThemeDB.fallback_font, node_rect.position + Vector2(14, 43), detail, HORIZONTAL_ALIGNMENT_LEFT, node_rect.size.x - 28.0, 14, accent)
 
 func _survivor_info_close_rect() -> Rect2:
 	var panel := _profile_panel_rect()
@@ -2221,7 +2249,7 @@ func _draw_survivor_info_panel() -> void:
 	draw_rect(portrait, Color(0.10, 0.20, 0.30, 1.0))
 	draw_texture_rect(SURVIVOR_TEXTURE, portrait, false)
 	draw_string(ThemeDB.fallback_font, panel_position + Vector2(12, 29), "OFFICER REED", HORIZONTAL_ALIGNMENT_LEFT, panel.size.x - 60.0, 22, Color.WHITE)
-	var status := "RELOADING" if is_reloading else "%d / %d" % [ammo, MAGAZINE_SIZE]
+	var status := "RELOADING" if is_reloading else "%d / %d" % [ammo, _magazine_size()]
 	var stats_x := panel_position.x + 122.0
 	var stats_width := panel.size.x - 134.0
 	draw_string(ThemeDB.fallback_font, Vector2(stats_x, panel_position.y + 55), "POLICE • ACC %d%%" % int(_cop_accuracy() * 100.0), HORIZONTAL_ALIGNMENT_LEFT, stats_width, 15, Color("#83c7ff"))
@@ -2249,4 +2277,5 @@ func _draw_baseball_info_panel() -> void:
 	draw_string(ThemeDB.fallback_font, Vector2(stats_x, panel_position.y + 108), "HEALTH  %d / %d" % [baseball_health, baseball_max_health], HORIZONTAL_ALIGNMENT_LEFT, stats_width, 17, Color.WHITE)
 	draw_string(ThemeDB.fallback_font, Vector2(stats_x, panel_position.y + 134), "BAT DAMAGE  %.2f" % _baseball_damage(), HORIZONTAL_ALIGNMENT_LEFT, stats_width, 17, Color.WHITE)
 	draw_string(ThemeDB.fallback_font, Vector2(stats_x, panel_position.y + 160), "KILLS  %d" % baseball_kills, HORIZONTAL_ALIGNMENT_LEFT, stats_width, 17, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, Vector2(stats_x, panel_position.y + 186), "CD %.2fs  KB %d" % [_baseball_attack_rate(), int(_baseball_knockback_speed())], HORIZONTAL_ALIGNMENT_LEFT, stats_width, 17, Color.WHITE)
 	_draw_skill_up_button(baseball_skill_points)
