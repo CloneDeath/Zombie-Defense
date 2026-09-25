@@ -1138,7 +1138,7 @@ func _swing_bat(target: Dictionary) -> void:
 				zombie.target_id = "baseball"
 
 func _baseball_damage() -> float:
-	return BASEBALL_DAMAGE + (baseball_level - 1) * BASEBALL_DAMAGE_PER_LEVEL + baseball_damage_skill * 0.25
+	return BASEBALL_DAMAGE + (baseball_level - 1) * BASEBALL_DAMAGE_PER_LEVEL + baseball_damage_skill * 0.5
 
 func _closest_zombie() -> Dictionary:
 	var closest: Dictionary = {}
@@ -1223,7 +1223,7 @@ func _cop_accuracy() -> float:
 	return minf(0.98, COP_ACCURACY + cop_accuracy_skill * 0.04)
 
 func _cop_damage() -> float:
-	return 1.0 + cop_damage_skill * 0.25
+	return 1.0 + cop_damage_skill
 
 func _award_cop_xp() -> void:
 	cop_xp += 1
@@ -2151,11 +2151,19 @@ func _draw_skill_tree() -> void:
 		var label := ""
 		var detail := ""
 		if skill_tree_unit == "cop":
-			label = "STOPPING POWER" if i == 0 else "MARKSMANSHIP"
-			detail = "+0.25 bullet damage • Rank %d" % cop_damage_skill if i == 0 else "+4% accuracy • Rank %d" % cop_accuracy_skill
+			if i == 0:
+				label = "STOPPING POWER"
+				detail = "+1 bullet damage • Rank %d" % cop_damage_skill
+			else:
+				label = "MARKSMANSHIP"
+				detail = "+4%% accuracy • Rank %d" % cop_accuracy_skill
 		else:
-			label = "POWER SWING" if i == 0 else "TOUGHNESS"
-			detail = "+0.25 bat damage • Rank %d" % baseball_damage_skill if i == 0 else "+2 maximum health • Rank %d" % baseball_health_skill
+			if i == 0:
+				label = "POWER SWING"
+				detail = "+0.5 bat damage • Rank %d" % baseball_damage_skill
+			else:
+				label = "TOUGHNESS"
+				detail = "+2 maximum health • Rank %d" % baseball_health_skill
 		draw_string(ThemeDB.fallback_font, node_rect.position + Vector2(18, 30), label, HORIZONTAL_ALIGNMENT_LEFT, node_rect.size.x - 36.0, 19, Color.WHITE)
 		draw_string(ThemeDB.fallback_font, node_rect.position + Vector2(18, 57), detail, HORIZONTAL_ALIGNMENT_LEFT, node_rect.size.x - 36.0, 15, accent)
 
