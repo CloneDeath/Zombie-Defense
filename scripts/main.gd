@@ -2055,7 +2055,9 @@ func _draw_skill_star(center: Vector2) -> void:
 		var angle := -PI * 0.5 + i * PI / 5.0
 		points.append(center + Vector2.RIGHT.rotated(angle) * radius)
 	draw_colored_polygon(points, Color("#ffd84a"))
-	draw_polyline(PackedVector2Array(Array(points) + [points[0]]), Color("#fff2a0"), 1.5)
+	var outline := points.duplicate()
+	outline.append(points[0])
+	draw_polyline(outline, Color("#fff2a0"), 1.5)
 
 func _skill_up_button_rect() -> Rect2:
 	return Rect2(Vector2(26, size.y - 52), Vector2(76, 28))
