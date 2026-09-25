@@ -69,6 +69,8 @@ const STREET_WIDTH_TILES := 6
 const SIDEWALK_WIDTH_TILES := 1
 const SURVIVOR_RANGE_METERS := 5.0
 const SURVIVOR_AWARENESS_MULTIPLIER := 2.0
+const ZONE_ALERT_METERS := 3.0
+const COP_COVER_TRIGGER_METERS := 3.25
 const SURVIVOR_TURN_SPEED := 2.4
 const TIME_BETWEEN_WAVES := 8.0
 const MIN_TIME_BETWEEN_ZOMBIES := 0.08
@@ -123,6 +125,8 @@ var reload_time_remaining := 0.0
 var is_reloading := false
 var survivor_position := Vector2.ZERO
 var survivor_target := Vector2.ZERO
+var survivor_patrol_target := Vector2.ZERO
+var survivor_patrol_timer := 0.0
 var survivor_is_walking := false
 var survivor_retreating := false
 var survivor_evacuated := false
@@ -642,13 +646,14 @@ func _update_survivor(delta: float) -> void:
 		else:
 			return
 
-	survivor_target = _zone_home(survivor_spawn, "cop")
+	var zone := _deployment_zones()[survivor_spawn]
+	var safe_zone := zone.grow(-SURVIVOR_COLLISION_RADIUS)
 	var target := _closest_zombie()
+	var zombie_position := Vector2.ZERO
 	var distance_to_zombie := INF
 	if not target.is_empty():
-		var zombie_position := _zombie_position(target)
+		zombie_position = _zombie_position(target)
 		distance_to_zombie = survivor_position.distance_to(zombie_position)
-		survivor_target = _cop_cover_position(zombie_position)
 
 	var zombie_in_range := distance_to_zombie <= _survivor_range()
 	var zombie_in_awareness := distance_to_zombie <= _survivor_range() * SURVIVOR_AWARENESS_MULTIPLIER
@@ -658,57 +663,88 @@ func _update_survivor(delta: float) -> void:
 	if ammo <= 0 or (ammo <= EARLY_RELOAD_AT and not zombie_in_awareness):
 		_start_reload()
 		return
+
+	if not zone.has_point(survivor_position):
+		# Finish the assignment before beginning local patrol behavior.
+		survivor_target = _zone_home(survivor_spawn, "cop")
+	elif zombie_in_awareness:
+		survivor_patrol_timer = 0.0
+		if distance_to_zombie <= COP_COVER_TRIGGER_METERS * TILE_SIZE:
+			# Close pressure sends the cop to one of the fixed spots behind a car.
+			survivor_target = _cop_cover_position(zombie_position)
+		elif not zombie_in_range:
+			# Step forward only far enough to put the target inside gun range.
+			survivor_target = _cop_firing_position(zombie_position, safe_zone)
+		else:
+			survivor_target = survivor_position
+	else:
+		# Quiet periods are patrol time rather than a return to a single home point.
+		survivor_patrol_timer -= delta
+		if survivor_patrol_target == Vector2.ZERO or survivor_position.distance_to(survivor_patrol_target) <= 8.0 or survivor_patrol_timer <= 0.0:
+			survivor_patrol_target = _random_patrol_point(safe_zone)
+			survivor_patrol_timer = randf_range(2.5, 5.0)
+		survivor_target = survivor_patrol_target
+
 	if zombie_in_awareness:
-		var desired_angle := survivor_position.angle_to_point(_zombie_position(target))
+		var desired_angle := survivor_position.angle_to_point(zombie_position)
 		survivor_aim_angle = rotate_toward(survivor_aim_angle, desired_angle, SURVIVOR_TURN_SPEED * delta)
 	elif survivor_position.distance_to(survivor_target) > 1.0:
 		var walk_angle := survivor_position.angle_to_point(survivor_target)
 		survivor_aim_angle = rotate_toward(survivor_aim_angle, walk_angle, SURVIVOR_TURN_SPEED * delta)
 
-	var distance_to_destination := survivor_position.distance_to(survivor_target)
 	if zombie_in_range:
 		fire_cooldown -= delta
 		if fire_cooldown <= 0.0:
 			_shoot(target)
-		survivor_is_walking = distance_to_destination > 1.0
-		if survivor_is_walking:
-			var combat_speed := _survivor_travel_speed(survivor_position, SURVIVOR_COMBAT_SPEED)
-			survivor_position = _move_around_car(
-				survivor_position,
-				survivor_target,
-				combat_speed * delta
-			)
-	elif distance_to_destination > 1.0:
+
+	var distance_to_destination := survivor_position.distance_to(survivor_target)
+	if distance_to_destination > 4.0:
 		survivor_is_walking = true
-		var travel_speed := _survivor_travel_speed(survivor_position, SURVIVOR_SPEED)
+		var base_speed := SURVIVOR_SPEED if not zone.has_point(survivor_position) else SURVIVOR_COMBAT_SPEED
+		var travel_speed := _survivor_travel_speed(survivor_position, base_speed)
 		survivor_position = _move_around_car(survivor_position, survivor_target, travel_speed * delta)
 	else:
 		survivor_is_walking = false
 
+func _cop_firing_position(zombie_position: Vector2, safe_zone: Rect2) -> Vector2:
+	var away_from_zombie := zombie_position.direction_to(survivor_position)
+	if away_from_zombie.is_zero_approx():
+		away_from_zombie = Vector2.LEFT
+	var candidate := zombie_position + away_from_zombie * _survivor_range() * 0.88
+	candidate.x = clampf(candidate.x, safe_zone.position.x, safe_zone.end.x)
+	candidate.y = clampf(candidate.y, safe_zone.position.y, safe_zone.end.y)
+	return candidate
+
 func _cop_cover_position(zombie_position: Vector2) -> Vector2:
-	var home := _zone_home(survivor_spawn, "cop")
 	if survivor_spawn < 0:
-		return home
+		return survivor_position
 	var safe_zone := _deployment_zones()[survivor_spawn].grow(-SURVIVOR_COLLISION_RADIUS)
-	var best_position := home
+	var best_position := survivor_position
 	var best_score := INF
-	for car_rect in _car_obstacle_rects(12.0):
-		var center := car_rect.get_center()
-		if not safe_zone.has_point(center):
-			continue
-		var away_from_zombie := zombie_position.direction_to(center)
-		if away_from_zombie.is_zero_approx():
-			away_from_zombie = Vector2.RIGHT
-		var cover_distance := maxf(car_rect.size.x, car_rect.size.y) * 0.5 + SURVIVOR_COLLISION_RADIUS + 8.0
-		var candidate := center + away_from_zombie * cover_distance
-		candidate.x = clampf(candidate.x, safe_zone.position.x, safe_zone.end.x)
-		candidate.y = clampf(candidate.y, safe_zone.position.y, safe_zone.end.y)
-		if _zombie_position_blocked(candidate):
-			continue
-		var score := survivor_position.distance_to(candidate) + zombie_position.distance_to(candidate) * 0.08
-		if score < best_score:
-			best_score = score
-			best_position = candidate
+	for car_rect in _car_obstacle_rects(10.0):
+		var half_size := car_rect.size * 0.5
+		var offset := Vector2(
+			half_size.x + SURVIVOR_COLLISION_RADIUS + 10.0,
+			half_size.y + SURVIVOR_COLLISION_RADIUS + 10.0
+		)
+		var cover_spots: Array[Vector2] = [
+			car_rect.get_center() + Vector2(offset.x, 0.0),
+			car_rect.get_center() - Vector2(offset.x, 0.0),
+			car_rect.get_center() + Vector2(0.0, offset.y),
+			car_rect.get_center() - Vector2(0.0, offset.y)
+		]
+		for candidate in cover_spots:
+			if not safe_zone.has_point(candidate):
+				continue
+			if _zombie_position_blocked(candidate):
+				continue
+			# Only use the spot when the car actually lies between it and the threat.
+			if not _segment_intersects_rect(zombie_position, candidate, car_rect):
+				continue
+			var score := survivor_position.distance_to(candidate)
+			if score < best_score:
+				best_score = score
+				best_position = candidate
 	return best_position
 
 func _update_baseball_survivor(delta: float) -> void:
@@ -794,10 +830,14 @@ func _update_baseball_survivor(delta: float) -> void:
 			baseball_position = _move_around_car(baseball_position, target_position, chase_speed * delta)
 	else:
 		var nearest_zombie := _closest_zombie_to_baseball()
+		var zombie_near_zone := false
 		if not nearest_zombie.is_empty():
-			baseball_target = _zone_edge_toward(_zombie_position(nearest_zombie), safe_zone)
-			baseball_patrol_timer = 0.0
-		else:
+			var nearest_position := _zombie_position(nearest_zombie)
+			zombie_near_zone = _distance_to_rect(nearest_position, zone) <= ZONE_ALERT_METERS * TILE_SIZE
+			if zombie_near_zone:
+				baseball_target = _zone_edge_toward(nearest_position, safe_zone)
+				baseball_patrol_timer = 0.0
+		if not zombie_near_zone:
 			baseball_patrol_timer -= delta
 			if baseball_patrol_target == Vector2.ZERO or baseball_position.distance_to(baseball_patrol_target) <= 8.0 or baseball_patrol_timer <= 0.0:
 				baseball_patrol_target = _random_patrol_point(safe_zone)
@@ -827,6 +867,13 @@ func _zone_edge_toward(point: Vector2, zone: Rect2) -> Vector2:
 		clampf(point.x, zone.position.x, zone.end.x),
 		clampf(point.y, zone.position.y, zone.end.y)
 	)
+
+func _distance_to_rect(point: Vector2, rect: Rect2) -> float:
+	var closest := Vector2(
+		clampf(point.x, rect.position.x, rect.end.x),
+		clampf(point.y, rect.position.y, rect.end.y)
+	)
+	return point.distance_to(closest)
 
 func _random_patrol_point(zone: Rect2) -> Vector2:
 	var obstacles := _car_obstacle_rects(30.0)
@@ -1211,6 +1258,8 @@ func _start_game() -> void:
 	reload_time_remaining = 0.0
 	is_reloading = false
 	survivor_aim_angle = PI
+	survivor_patrol_target = Vector2.ZERO
+	survivor_patrol_timer = 0.0
 	survivor_retreating = false
 	survivor_evacuated = false
 	shots.clear()
@@ -1520,6 +1569,8 @@ func _place_survivor(index: int) -> void:
 	survivor_position = _survivor_entry_position()
 	survivor_aim_angle = PI
 	survivor_is_walking = true
+	survivor_patrol_target = Vector2.ZERO
+	survivor_patrol_timer = 0.0
 	survivor_selected = false
 	dragging_survivor = false
 	fire_cooldown = 0.0
