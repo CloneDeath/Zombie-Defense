@@ -52,7 +52,7 @@ const BASEBALL_KNOCKBACK_SPEED := 420.0
 const ZOMBIE_KNOCKBACK_DECELERATION := 1225.0
 const BASEBALL_AOE_METERS := 0.9
 const BASEBALL_SWING_DURATION := 0.28
-const ZOMBIE_MAX_HEALTH := 3
+const ZOMBIE_MAX_HEALTH := 100
 const FIRE_RATE := 0.65
 const COP_ACCURACY := 0.78
 const COP_MAX_SPREAD_DEGREES := 14.0
@@ -95,7 +95,8 @@ var cop_kills := 0
 var cop_skill_points := 0
 var cop_skill_star := false
 var cop_damage_skill := 0
-var cop_accuracy_skill := 0
+var cop_crit_skill := 0
+var cop_range_skill := 0
 var baseball_spawn := -1
 var baseball_max_health := BASEBALL_MAX_HEALTH
 var baseball_level := 1
@@ -1203,7 +1204,10 @@ func _shoot(target: Dictionary) -> void:
 		hit_zombie.x = knocked_position.x / _map_size().x
 		hit_zombie.y = knocked_position.y
 		hit_zombie.movement_factor = 0.08
-		hit_zombie.hp -= _cop_damage()
+		var shot_damage := _cop_damage()
+		if randf() < _cop_crit_chance():
+			shot_damage *= 2.0
+		hit_zombie.hp -= shot_damage
 		if hit_zombie.hp <= 0:
 			zombies.erase(hit_zombie)
 			zombies_killed += 1
@@ -1220,10 +1224,16 @@ func _shoot(target: Dictionary) -> void:
 				zombie.target_id = "cop"
 
 func _cop_accuracy() -> float:
-	return minf(0.98, COP_ACCURACY + cop_accuracy_skill * 0.04)
+	return COP_ACCURACY
 
 func _cop_damage() -> float:
-	return 1.0 + cop_damage_skill
+	return 20.0 + cop_damage_skill * 5.0
+
+func _cop_crit_chance() -> float:
+	return minf(0.90, 0.10 + cop_crit_skill * 0.10)
+
+func _cop_range_meters() -> float:
+	return minf(SURVIVOR_RANGE_METERS * 2.0, SURVIVOR_RANGE_METERS + cop_range_skill)
 
 func _award_cop_xp() -> void:
 	cop_xp += 1
@@ -1269,7 +1279,8 @@ func _start_game() -> void:
 	cop_skill_points = 0
 	cop_skill_star = false
 	cop_damage_skill = 0
-	cop_accuracy_skill = 0
+	cop_crit_skill = 0
+	cop_range_skill = 0
 	baseball_spawn = -1
 	baseball_max_health = BASEBALL_MAX_HEALTH
 	baseball_level = 1
@@ -1769,7 +1780,7 @@ func _zombie_position(zombie: Dictionary) -> Vector2:
 	return Vector2(zombie.x * _map_size().x, zombie.y)
 
 func _survivor_range() -> float:
-	return SURVIVOR_RANGE_METERS * TILE_SIZE
+	return _cop_range_meters() * TILE_SIZE
 
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), Color("#111812"))
@@ -2059,14 +2070,19 @@ func _draw_skill_star(center: Vector2) -> void:
 	outline.append(points[0])
 	draw_polyline(outline, Color("#fff2a0"), 1.5)
 
+func _profile_panel_rect() -> Rect2:
+	var panel_size := Vector2(minf(340.0, size.x - 28.0), 220.0)
+	return Rect2(Vector2(14.0, size.y - 115.0 - panel_size.y), panel_size)
+
 func _skill_up_button_rect() -> Rect2:
-	return Rect2(Vector2(26, size.y - 52), Vector2(76, 28))
+	var panel := _profile_panel_rect()
+	return Rect2(Vector2(panel.position.x + 12.0, panel.end.y - 52.0), Vector2(122, 40))
 
 func _draw_skill_up_button(points: int) -> void:
 	var rect := _skill_up_button_rect()
 	draw_rect(rect, Color("#7d5d19") if points > 0 else Color("#3f4142"))
-	draw_rect(rect, Color("#ffd84a") if points > 0 else Color("#777777"), false, 2.0)
-	draw_string(ThemeDB.fallback_font, rect.position + Vector2(3, 19), "SKILL UP %d" % points, HORIZONTAL_ALIGNMENT_CENTER, 70, 12, Color.WHITE)
+	draw_rect(rect, Color("#ffd84a") if points > 0 else Color("#777777"), false, 3.0)
+	draw_string(ThemeDB.fallback_font, rect.position + Vector2(5, 27), "SKILL UP  %d" % points, HORIZONTAL_ALIGNMENT_CENTER, rect.size.x - 10.0, 17, Color.WHITE)
 
 func _skill_tree_panel_rect() -> Rect2:
 	var panel_size := Vector2(minf(500.0, size.x - 30.0), minf(410.0, size.y - 70.0))
@@ -2079,8 +2095,8 @@ func _skill_tree_close_rect() -> Rect2:
 func _skill_tree_node_rect(index: int) -> Rect2:
 	var panel := _skill_tree_panel_rect()
 	return Rect2(
-		Vector2(panel.position.x + 30.0, panel.position.y + 125.0 + index * 105.0),
-		Vector2(panel.size.x - 60.0, 78.0)
+		Vector2(panel.position.x + 30.0, panel.position.y + 110.0 + index * 90.0),
+		Vector2(panel.size.x - 60.0, 72.0)
 	)
 
 func _open_skill_tree(unit: String) -> void:
@@ -2107,18 +2123,24 @@ func _handle_skill_tree_pointer(position: Vector2) -> void:
 		_close_skill_tree()
 		return
 	var node := -1
-	if _skill_tree_node_rect(0).has_point(position):
-		node = 0
-	elif _skill_tree_node_rect(1).has_point(position):
-		node = 1
+	var node_count := 3 if skill_tree_unit == "cop" else 2
+	for i in node_count:
+		if _skill_tree_node_rect(i).has_point(position):
+			node = i
+			break
 	if node < 0:
 		return
+
 	if skill_tree_unit == "cop" and cop_skill_points > 0:
-		cop_skill_points -= 1
 		if node == 0:
 			cop_damage_skill += 1
+		elif node == 1 and cop_crit_skill < 8:
+			cop_crit_skill += 1
+		elif node == 2 and cop_range_skill < int(SURVIVOR_RANGE_METERS):
+			cop_range_skill += 1
 		else:
-			cop_accuracy_skill += 1
+			return
+		cop_skill_points -= 1
 	elif skill_tree_unit == "baseball" and baseball_skill_points > 0:
 		baseball_skill_points -= 1
 		if node == 0:
@@ -2144,7 +2166,8 @@ func _draw_skill_tree() -> void:
 	var points := cop_skill_points if skill_tree_unit == "cop" else baseball_skill_points
 	draw_string(ThemeDB.fallback_font, panel.position + Vector2(24, 42), title, HORIZONTAL_ALIGNMENT_LEFT, panel.size.x - 90.0, 24, Color.WHITE)
 	draw_string(ThemeDB.fallback_font, panel.position + Vector2(24, 78), "SKILL POINTS: %d" % points, HORIZONTAL_ALIGNMENT_LEFT, panel.size.x - 48.0, 18, Color("#ffd84a"))
-	for i in 2:
+	var node_count := 3 if skill_tree_unit == "cop" else 2
+	for i in node_count:
 		var node_rect := _skill_tree_node_rect(i)
 		draw_rect(node_rect, Color("#26343c"))
 		draw_rect(node_rect, accent, false, 2.0)
@@ -2153,22 +2176,32 @@ func _draw_skill_tree() -> void:
 		if skill_tree_unit == "cop":
 			if i == 0:
 				label = "STOPPING POWER"
-				detail = "+1 bullet damage • Rank %d" % cop_damage_skill
+				detail = "DAMAGE: %d → %d" % [int(_cop_damage()), int(_cop_damage() + 5.0)]
+			elif i == 1:
+				label = "CRITICAL CHANCE"
+				if cop_crit_skill >= 8:
+					detail = "CRIT: 90% • MAX"
+				else:
+					detail = "CRIT: %d%% → %d%%" % [int(_cop_crit_chance() * 100.0), int((_cop_crit_chance() + 0.10) * 100.0)]
 			else:
-				label = "MARKSMANSHIP"
-				detail = "+4%% accuracy • Rank %d" % cop_accuracy_skill
+				label = "ENGAGEMENT RANGE"
+				if cop_range_skill >= int(SURVIVOR_RANGE_METERS):
+					detail = "RANGE: %dm • MAX" % int(_cop_range_meters())
+				else:
+					detail = "RANGE: %dm → %dm" % [int(_cop_range_meters()), int(_cop_range_meters() + 1.0)]
 		else:
 			if i == 0:
 				label = "POWER SWING"
-				detail = "+0.5 bat damage • Rank %d" % baseball_damage_skill
+				detail = "DAMAGE: %.2f → %.2f" % [_baseball_damage(), _baseball_damage() + 0.5]
 			else:
 				label = "TOUGHNESS"
-				detail = "+2 maximum health • Rank %d" % baseball_health_skill
-		draw_string(ThemeDB.fallback_font, node_rect.position + Vector2(18, 30), label, HORIZONTAL_ALIGNMENT_LEFT, node_rect.size.x - 36.0, 19, Color.WHITE)
-		draw_string(ThemeDB.fallback_font, node_rect.position + Vector2(18, 57), detail, HORIZONTAL_ALIGNMENT_LEFT, node_rect.size.x - 36.0, 15, accent)
+				detail = "MAX HEALTH: %d → %d" % [baseball_max_health, baseball_max_health + 2]
+		draw_string(ThemeDB.fallback_font, node_rect.position + Vector2(18, 28), label, HORIZONTAL_ALIGNMENT_LEFT, node_rect.size.x - 36.0, 19, Color.WHITE)
+		draw_string(ThemeDB.fallback_font, node_rect.position + Vector2(18, 54), detail, HORIZONTAL_ALIGNMENT_LEFT, node_rect.size.x - 36.0, 16, accent)
 
 func _survivor_info_close_rect() -> Rect2:
-	return Rect2(Vector2(234, size.y - 168), Vector2(36, 36))
+	var panel := _profile_panel_rect()
+	return Rect2(Vector2(panel.end.x - 42.0, panel.position.y + 6.0), Vector2(36, 36))
 
 func _draw_survivor_info_close_button(color: Color) -> void:
 	var hit_rect := _survivor_info_close_rect()
@@ -2179,48 +2212,41 @@ func _draw_survivor_info_close_button(color: Color) -> void:
 	draw_line(Vector2(button_rect.end.x - 7, button_rect.position.y + 7), Vector2(button_rect.position.x + 7, button_rect.end.y - 7), color, 2.5)
 
 func _draw_survivor_info_panel() -> void:
-	var panel_size := Vector2(260, 158)
-	var panel_position := Vector2(14, size.y - panel_size.y - 14)
-	var panel := Rect2(panel_position, panel_size)
-	draw_rect(panel, Color(0.035, 0.055, 0.08, 0.92))
-	draw_rect(panel, Color(0.25, 0.62, 0.92, 0.9), false, 2.0)
+	var panel := _profile_panel_rect()
+	var panel_position := panel.position
+	draw_rect(panel, Color(0.035, 0.055, 0.08, 0.94))
+	draw_rect(panel, Color(0.25, 0.62, 0.92, 0.9), false, 3.0)
 	_draw_survivor_info_close_button(Color("#83c7ff"))
-
-	var portrait := Rect2(panel_position + Vector2(12, 36), Vector2(76, 76))
+	var portrait := Rect2(panel_position + Vector2(12, 42), Vector2(96, 96))
 	draw_rect(portrait, Color(0.10, 0.20, 0.30, 1.0))
 	draw_texture_rect(SURVIVOR_TEXTURE, portrait, false)
-
-	draw_string(
-		ThemeDB.fallback_font,
-		panel_position + Vector2(12, 25),
-		"OFFICER REED",
-		HORIZONTAL_ALIGNMENT_LEFT,
-		220,
-		20,
-		Color.WHITE
-	)
+	draw_string(ThemeDB.fallback_font, panel_position + Vector2(12, 29), "OFFICER REED", HORIZONTAL_ALIGNMENT_LEFT, panel.size.x - 60.0, 22, Color.WHITE)
 	var status := "RELOADING" if is_reloading else "%d / %d" % [ammo, MAGAZINE_SIZE]
-	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 52), "POLICE • ACCURACY %d%%" % int(_cop_accuracy() * 100.0), HORIZONTAL_ALIGNMENT_LEFT, 145, 14, Color("#83c7ff"))
-	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 74), "LEVEL   %d  XP %d/%d" % [cop_level, cop_xp, cop_xp_to_next], HORIZONTAL_ALIGNMENT_LEFT, 150, 15, Color.WHITE)
-	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 96), "HEALTH  %d / %d" % [survivor_health, survivor_max_health], HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
-	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 118), "AMMO    %s" % status, HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
-	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 140), "KILLS   %d" % cop_kills, HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
+	var stats_x := panel_position.x + 122.0
+	var stats_width := panel.size.x - 134.0
+	draw_string(ThemeDB.fallback_font, Vector2(stats_x, panel_position.y + 55), "POLICE • ACC %d%%" % int(_cop_accuracy() * 100.0), HORIZONTAL_ALIGNMENT_LEFT, stats_width, 15, Color("#83c7ff"))
+	draw_string(ThemeDB.fallback_font, Vector2(stats_x, panel_position.y + 82), "LEVEL  %d   XP %d/%d" % [cop_level, cop_xp, cop_xp_to_next], HORIZONTAL_ALIGNMENT_LEFT, stats_width, 17, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, Vector2(stats_x, panel_position.y + 108), "HEALTH  %d / %d" % [survivor_health, survivor_max_health], HORIZONTAL_ALIGNMENT_LEFT, stats_width, 17, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, Vector2(stats_x, panel_position.y + 134), "AMMO  %s" % status, HORIZONTAL_ALIGNMENT_LEFT, stats_width, 17, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, Vector2(stats_x, panel_position.y + 160), "DMG %d  CRIT %d%%" % [int(_cop_damage()), int(_cop_crit_chance() * 100.0)], HORIZONTAL_ALIGNMENT_LEFT, stats_width, 17, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, Vector2(stats_x, panel_position.y + 186), "RANGE %dm  KILLS %d" % [int(_cop_range_meters()), cop_kills], HORIZONTAL_ALIGNMENT_LEFT, stats_width, 17, Color.WHITE)
 	_draw_skill_up_button(cop_skill_points)
 
 func _draw_baseball_info_panel() -> void:
-	var panel_size := Vector2(260, 158)
-	var panel_position := Vector2(14, size.y - panel_size.y - 14)
-	var panel := Rect2(panel_position, panel_size)
-	draw_rect(panel, Color(0.05, 0.045, 0.035, 0.92))
-	draw_rect(panel, Color(0.82, 0.55, 0.27, 0.9), false, 2.0)
+	var panel := _profile_panel_rect()
+	var panel_position := panel.position
+	draw_rect(panel, Color(0.05, 0.045, 0.035, 0.94))
+	draw_rect(panel, Color(0.82, 0.55, 0.27, 0.9), false, 3.0)
 	_draw_survivor_info_close_button(Color("#f0b96f"))
-	var portrait := Rect2(panel_position + Vector2(12, 36), Vector2(76, 76))
+	var portrait := Rect2(panel_position + Vector2(12, 42), Vector2(96, 96))
 	draw_rect(portrait, Color(0.18, 0.13, 0.08, 1.0))
 	draw_texture_rect(BASEBALL_TEXTURE, portrait, false)
-	draw_string(ThemeDB.fallback_font, panel_position + Vector2(12, 25), "CASEY MORGAN", HORIZONTAL_ALIGNMENT_LEFT, 220, 20, Color.WHITE)
-	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 52), "BASEBALL PLAYER", HORIZONTAL_ALIGNMENT_LEFT, 145, 14, Color("#f0b96f"))
-	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 74), "LEVEL   %d  XP %d/%d" % [baseball_level, baseball_xp, baseball_xp_to_next], HORIZONTAL_ALIGNMENT_LEFT, 150, 15, Color.WHITE)
-	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 96), "HEALTH  %d / %d" % [baseball_health, baseball_max_health], HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
-	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 118), "BAT DMG %.2f" % _baseball_damage(), HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
-	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 140), "KILLS   %d" % baseball_kills, HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, panel_position + Vector2(12, 29), "CASEY MORGAN", HORIZONTAL_ALIGNMENT_LEFT, panel.size.x - 60.0, 22, Color.WHITE)
+	var stats_x := panel_position.x + 122.0
+	var stats_width := panel.size.x - 134.0
+	draw_string(ThemeDB.fallback_font, Vector2(stats_x, panel_position.y + 55), "BASEBALL PLAYER", HORIZONTAL_ALIGNMENT_LEFT, stats_width, 15, Color("#f0b96f"))
+	draw_string(ThemeDB.fallback_font, Vector2(stats_x, panel_position.y + 82), "LEVEL  %d   XP %d/%d" % [baseball_level, baseball_xp, baseball_xp_to_next], HORIZONTAL_ALIGNMENT_LEFT, stats_width, 17, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, Vector2(stats_x, panel_position.y + 108), "HEALTH  %d / %d" % [baseball_health, baseball_max_health], HORIZONTAL_ALIGNMENT_LEFT, stats_width, 17, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, Vector2(stats_x, panel_position.y + 134), "BAT DAMAGE  %.2f" % _baseball_damage(), HORIZONTAL_ALIGNMENT_LEFT, stats_width, 17, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, Vector2(stats_x, panel_position.y + 160), "KILLS  %d" % baseball_kills, HORIZONTAL_ALIGNMENT_LEFT, stats_width, 17, Color.WHITE)
 	_draw_skill_up_button(baseball_skill_points)
