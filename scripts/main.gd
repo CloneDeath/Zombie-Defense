@@ -92,6 +92,10 @@ var cop_level := 1
 var cop_xp := 0
 var cop_xp_to_next := 3
 var cop_kills := 0
+var cop_skill_points := 0
+var cop_skill_star := false
+var cop_damage_skill := 0
+var cop_accuracy_skill := 0
 var baseball_spawn := -1
 var baseball_max_health := BASEBALL_MAX_HEALTH
 var baseball_level := 1
@@ -112,6 +116,13 @@ var baseball_aim_angle := PI
 var baseball_attack_cooldown := 0.0
 var baseball_swing_time := 0.0
 var baseball_kills := 0
+var baseball_skill_points := 0
+var baseball_skill_star := false
+var baseball_damage_skill := 0
+var baseball_health_skill := 0
+var skill_tree_open := false
+var skill_tree_unit := ""
+var skill_tree_was_paused := false
 var dragging_unit := ""
 var survivor_health := SURVIVOR_MAX_HEALTH
 var survivor_alive := true
@@ -1127,7 +1138,7 @@ func _swing_bat(target: Dictionary) -> void:
 				zombie.target_id = "baseball"
 
 func _baseball_damage() -> float:
-	return BASEBALL_DAMAGE + (baseball_level - 1) * BASEBALL_DAMAGE_PER_LEVEL
+	return BASEBALL_DAMAGE + (baseball_level - 1) * BASEBALL_DAMAGE_PER_LEVEL + baseball_damage_skill * 0.25
 
 func _closest_zombie() -> Dictionary:
 	var closest: Dictionary = {}
@@ -1150,7 +1161,7 @@ func _shoot(target: Dictionary) -> void:
 		return
 
 	var intended_direction := survivor_position.direction_to(_zombie_position(target))
-	var max_spread := deg_to_rad(COP_MAX_SPREAD_DEGREES) * (1.0 - COP_ACCURACY)
+	var max_spread := deg_to_rad(COP_MAX_SPREAD_DEGREES) * (1.0 - _cop_accuracy())
 	var shot_direction := intended_direction.rotated(randf_range(-max_spread, max_spread))
 	var ray_length := _survivor_range()
 	var ray_end := survivor_position + shot_direction * ray_length
@@ -1192,7 +1203,7 @@ func _shoot(target: Dictionary) -> void:
 		hit_zombie.x = knocked_position.x / _map_size().x
 		hit_zombie.y = knocked_position.y
 		hit_zombie.movement_factor = 0.08
-		hit_zombie.hp -= 1
+		hit_zombie.hp -= _cop_damage()
 		if hit_zombie.hp <= 0:
 			zombies.erase(hit_zombie)
 			zombies_killed += 1
@@ -1208,11 +1219,19 @@ func _shoot(target: Dictionary) -> void:
 			if randf() <= GUNSHOT_RETARGET_CHANCE:
 				zombie.target_id = "cop"
 
+func _cop_accuracy() -> float:
+	return minf(0.98, COP_ACCURACY + cop_accuracy_skill * 0.04)
+
+func _cop_damage() -> float:
+	return 1.0 + cop_damage_skill * 0.25
+
 func _award_cop_xp() -> void:
 	cop_xp += 1
 	if cop_xp >= cop_xp_to_next:
 		cop_xp -= cop_xp_to_next
 		cop_level += 1
+		cop_skill_points += 1
+		cop_skill_star = true
 		cop_xp_to_next = cop_level * 3
 		survivor_max_health += 2
 		survivor_health = survivor_max_health
@@ -1223,6 +1242,8 @@ func _award_baseball_xp() -> void:
 	if baseball_xp >= baseball_xp_to_next:
 		baseball_xp -= baseball_xp_to_next
 		baseball_level += 1
+		baseball_skill_points += 1
+		baseball_skill_star = true
 		baseball_xp_to_next = baseball_level * 3
 		baseball_max_health += 2
 		baseball_health = baseball_max_health
@@ -1245,6 +1266,10 @@ func _start_game() -> void:
 	cop_xp = 0
 	cop_xp_to_next = 3
 	cop_kills = 0
+	cop_skill_points = 0
+	cop_skill_star = false
+	cop_damage_skill = 0
+	cop_accuracy_skill = 0
 	baseball_spawn = -1
 	baseball_max_health = BASEBALL_MAX_HEALTH
 	baseball_level = 1
@@ -1265,6 +1290,12 @@ func _start_game() -> void:
 	baseball_attack_cooldown = 0.0
 	baseball_swing_time = 0.0
 	baseball_kills = 0
+	baseball_skill_points = 0
+	baseball_skill_star = false
+	baseball_damage_skill = 0
+	baseball_health_skill = 0
+	skill_tree_open = false
+	skill_tree_unit = ""
 	dragging_unit = ""
 	survivor_health = SURVIVOR_MAX_HEALTH
 	survivor_alive = true
@@ -1344,6 +1375,12 @@ func _show_results() -> void:
 
 func _input(event: InputEvent) -> void:
 	if screen != "playing":
+		return
+	if skill_tree_open:
+		if event is InputEventScreenTouch and event.pressed:
+			_handle_skill_tree_pointer(event.position)
+		elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+			_handle_skill_tree_pointer(event.position)
 		return
 	if event is InputEventScreenTouch or event is InputEventScreenDrag or event is InputEventMouseButton or event is InputEventMouseMotion:
 		if pause_button.get_global_rect().has_point(event.position) or fast_forward_button.get_global_rect().has_point(event.position) or retreat_button.get_global_rect().has_point(event.position):
@@ -1507,12 +1544,15 @@ func _handle_pointer_down(position: Vector2) -> bool:
 		dragging_unit = ""
 		queue_redraw()
 		return true
+	if (survivor_selected or baseball_selected) and _skill_up_button_rect().has_point(position):
+		_open_skill_tree("cop" if survivor_selected else "baseball")
+		return true
 	var touched_cop := (
-		(survivor_spawn < 0 and _survivor_card_rect().has_point(position))
+		(survivor_alive and not survivor_retreating and not survivor_evacuated and _survivor_card_rect().has_point(position))
 		or (survivor_spawn >= 0 and survivor_alive and not survivor_retreating and not survivor_evacuated and _map_to_screen(survivor_position).distance_to(position) <= 42.0)
 	)
 	var touched_baseball := (
-		(baseball_spawn < 0 and _baseball_card_rect().has_point(position))
+		(baseball_alive and not baseball_retreating and not baseball_evacuated and _baseball_card_rect().has_point(position))
 		or (baseball_spawn >= 0 and baseball_alive and not baseball_retreating and not baseball_evacuated and _map_to_screen(baseball_position).distance_to(position) <= 42.0)
 	)
 	if touched_cop or touched_baseball:
@@ -1802,6 +1842,8 @@ func _draw() -> void:
 		var survivor_bar := survivor_screen + Vector2(-28, -42)
 		draw_rect(Rect2(survivor_bar, Vector2(56, 6)), Color("#251f1f"))
 		draw_rect(Rect2(survivor_bar, Vector2(56.0 * survivor_health / survivor_max_health, 6)), Color("#63d471"))
+		if cop_skill_star:
+			_draw_skill_star(survivor_bar + Vector2(66, 3))
 
 	if baseball_spawn >= 0 and not baseball_evacuated:
 		var baseball_screen := _map_to_screen(baseball_position)
@@ -1834,6 +1876,8 @@ func _draw() -> void:
 		var baseball_bar := baseball_screen + Vector2(-28, -40)
 		draw_rect(Rect2(baseball_bar, Vector2(56, 6)), Color("#251f1f"))
 		draw_rect(Rect2(baseball_bar, Vector2(56.0 * baseball_health / baseball_max_health, 6)), Color("#63d471"))
+		if baseball_skill_star:
+			_draw_skill_star(baseball_bar + Vector2(66, 3))
 
 	for zombie in zombies:
 		var zombie_position := _map_to_screen(_zombie_position(zombie))
@@ -1869,21 +1913,22 @@ func _draw() -> void:
 		)
 		draw_arc(_map_to_screen(unit_position), (28.0 + progress * 18.0) * map_zoom, 0.0, TAU, 32, Color(1.0, 0.78, 0.18, alpha * 0.6), 3.0)
 
-	if survivor_spawn < 0:
-		var card := _survivor_card_rect()
-		var card_color := Color("#6f8e70") if survivor_selected else Color("#344d38")
-		draw_rect(card, card_color)
-		draw_rect(card, Color("#9fba9e"), false, 2)
-		draw_texture_rect(SURVIVOR_TEXTURE, Rect2(card.position + Vector2(23, 5), Vector2(58, 49)), false)
-		draw_string(ThemeDB.fallback_font, card.position + Vector2(10, 78), "COP • 5m", HORIZONTAL_ALIGNMENT_CENTER, 84, 13, Color.WHITE)
+	# Survivor cards remain available as a persistent roster and selection bar.
+	var cop_card := _survivor_card_rect()
+	var cop_card_color := Color("#6f8e70") if survivor_selected else Color("#344d38")
+	var cop_card_tint := Color.WHITE if survivor_alive and not survivor_evacuated else Color(0.35, 0.35, 0.35, 1.0)
+	draw_rect(cop_card, cop_card_color)
+	draw_rect(cop_card, Color("#9fba9e"), false, 2)
+	draw_texture_rect(SURVIVOR_TEXTURE, Rect2(cop_card.position + Vector2(23, 5), Vector2(58, 49)), false, cop_card_tint)
+	draw_string(ThemeDB.fallback_font, cop_card.position + Vector2(10, 78), "COP • 5m", HORIZONTAL_ALIGNMENT_CENTER, 84, 13, Color.WHITE)
 
-	if baseball_spawn < 0:
-		var card := _baseball_card_rect()
-		var card_color := Color("#7188a4") if baseball_selected else Color("#35465a")
-		draw_rect(card, card_color)
-		draw_rect(card, Color("#9fb9d2"), false, 2)
-		draw_texture_rect(BASEBALL_TEXTURE, Rect2(card.position + Vector2(23, 5), Vector2(58, 49)), false)
-		draw_string(ThemeDB.fallback_font, card.position + Vector2(7, 78), "BATTER • ZONE", HORIZONTAL_ALIGNMENT_CENTER, 90, 13, Color.WHITE)
+	var batter_card := _baseball_card_rect()
+	var batter_card_color := Color("#7188a4") if baseball_selected else Color("#35465a")
+	var batter_card_tint := Color.WHITE if baseball_alive and not baseball_evacuated else Color(0.35, 0.35, 0.35, 1.0)
+	draw_rect(batter_card, batter_card_color)
+	draw_rect(batter_card, Color("#9fb9d2"), false, 2)
+	draw_texture_rect(BASEBALL_TEXTURE, Rect2(batter_card.position + Vector2(23, 5), Vector2(58, 49)), false, batter_card_tint)
+	draw_string(ThemeDB.fallback_font, batter_card.position + Vector2(7, 78), "BATTER • ZONE", HORIZONTAL_ALIGNMENT_CENTER, 90, 13, Color.WHITE)
 
 	if dragging_survivor:
 		var drag_texture: Texture2D = SURVIVOR_TEXTURE if dragging_unit == "cop" else BASEBALL_TEXTURE
@@ -1893,6 +1938,8 @@ func _draw() -> void:
 		_draw_survivor_info_panel()
 	elif baseball_selected and baseball_spawn >= 0 and not baseball_evacuated:
 		_draw_baseball_info_panel()
+	if skill_tree_open:
+		_draw_skill_tree()
 
 func _zone_screen_polygon(zone: Rect2) -> PackedVector2Array:
 	return PackedVector2Array([
@@ -2001,6 +2048,115 @@ func _draw_house_interior() -> void:
 	draw_texture_rect(HOUSE_SOFA_TEXTURE, Rect2(Vector2(1080, 198), Vector2(92, 58)), false)
 	draw_texture_rect(HOUSE_PLANT_TEXTURE, Rect2(Vector2(1114, 137), Vector2(58, 58)), false)
 
+func _draw_skill_star(center: Vector2) -> void:
+	var points := PackedVector2Array()
+	for i in 10:
+		var radius := 9.0 if i % 2 == 0 else 4.0
+		var angle := -PI * 0.5 + i * PI / 5.0
+		points.append(center + Vector2.RIGHT.rotated(angle) * radius)
+	draw_colored_polygon(points, Color("#ffd84a"))
+	draw_polyline(PackedVector2Array(Array(points) + [points[0]]), Color("#fff2a0"), 1.5)
+
+func _skill_up_button_rect() -> Rect2:
+	return Rect2(Vector2(26, size.y - 52), Vector2(76, 28))
+
+func _draw_skill_up_button(points: int) -> void:
+	var rect := _skill_up_button_rect()
+	draw_rect(rect, Color("#7d5d19") if points > 0 else Color("#3f4142"))
+	draw_rect(rect, Color("#ffd84a") if points > 0 else Color("#777777"), false, 2.0)
+	draw_string(ThemeDB.fallback_font, rect.position + Vector2(3, 19), "SKILL UP %d" % points, HORIZONTAL_ALIGNMENT_CENTER, 70, 12, Color.WHITE)
+
+func _skill_tree_panel_rect() -> Rect2:
+	var panel_size := Vector2(minf(500.0, size.x - 30.0), minf(410.0, size.y - 70.0))
+	return Rect2((size - panel_size) * 0.5, panel_size)
+
+func _skill_tree_close_rect() -> Rect2:
+	var panel := _skill_tree_panel_rect()
+	return Rect2(Vector2(panel.end.x - 48.0, panel.position.y + 12.0), Vector2(36, 36))
+
+func _skill_tree_node_rect(index: int) -> Rect2:
+	var panel := _skill_tree_panel_rect()
+	return Rect2(
+		Vector2(panel.position.x + 30.0, panel.position.y + 125.0 + index * 105.0),
+		Vector2(panel.size.x - 60.0, 78.0)
+	)
+
+func _open_skill_tree(unit: String) -> void:
+	skill_tree_open = true
+	skill_tree_unit = unit
+	skill_tree_was_paused = game_paused
+	game_paused = true
+	pause_button.text = "PLAY"
+	queue_redraw()
+
+func _close_skill_tree() -> void:
+	if skill_tree_unit == "cop":
+		cop_skill_star = false
+	elif skill_tree_unit == "baseball":
+		baseball_skill_star = false
+	skill_tree_open = false
+	skill_tree_unit = ""
+	game_paused = skill_tree_was_paused
+	pause_button.text = "PLAY" if game_paused else "PAUSE"
+	queue_redraw()
+
+func _handle_skill_tree_pointer(position: Vector2) -> void:
+	if _skill_tree_close_rect().has_point(position):
+		_close_skill_tree()
+		return
+	var node := -1
+	if _skill_tree_node_rect(0).has_point(position):
+		node = 0
+	elif _skill_tree_node_rect(1).has_point(position):
+		node = 1
+	if node < 0:
+		return
+	if skill_tree_unit == "cop" and cop_skill_points > 0:
+		cop_skill_points -= 1
+		if node == 0:
+			cop_damage_skill += 1
+		else:
+			cop_accuracy_skill += 1
+	elif skill_tree_unit == "baseball" and baseball_skill_points > 0:
+		baseball_skill_points -= 1
+		if node == 0:
+			baseball_damage_skill += 1
+		else:
+			baseball_health_skill += 1
+			baseball_max_health += 2
+			baseball_health += 2
+	queue_redraw()
+
+func _draw_skill_tree() -> void:
+	draw_rect(Rect2(Vector2.ZERO, size), Color(0.0, 0.0, 0.0, 0.68))
+	var panel := _skill_tree_panel_rect()
+	var accent := Color("#83c7ff") if skill_tree_unit == "cop" else Color("#f0b96f")
+	draw_rect(panel, Color(0.035, 0.045, 0.055, 0.98))
+	draw_rect(panel, accent, false, 3.0)
+	var close := _skill_tree_close_rect()
+	draw_rect(close, Color("#24282b"))
+	draw_rect(close, accent, false, 2.0)
+	draw_line(close.position + Vector2(9, 9), close.end - Vector2(9, 9), accent, 3.0)
+	draw_line(Vector2(close.end.x - 9, close.position.y + 9), Vector2(close.position.x + 9, close.end.y - 9), accent, 3.0)
+	var title := "OFFICER REED — SKILLS" if skill_tree_unit == "cop" else "CASEY MORGAN — SKILLS"
+	var points := cop_skill_points if skill_tree_unit == "cop" else baseball_skill_points
+	draw_string(ThemeDB.fallback_font, panel.position + Vector2(24, 42), title, HORIZONTAL_ALIGNMENT_LEFT, panel.size.x - 90.0, 24, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, panel.position + Vector2(24, 78), "SKILL POINTS: %d" % points, HORIZONTAL_ALIGNMENT_LEFT, panel.size.x - 48.0, 18, Color("#ffd84a"))
+	for i in 2:
+		var node_rect := _skill_tree_node_rect(i)
+		draw_rect(node_rect, Color("#26343c"))
+		draw_rect(node_rect, accent, false, 2.0)
+		var label := ""
+		var detail := ""
+		if skill_tree_unit == "cop":
+			label = "STOPPING POWER" if i == 0 else "MARKSMANSHIP"
+			detail = "+0.25 bullet damage • Rank %d" % cop_damage_skill if i == 0 else "+4% accuracy • Rank %d" % cop_accuracy_skill
+		else:
+			label = "POWER SWING" if i == 0 else "TOUGHNESS"
+			detail = "+0.25 bat damage • Rank %d" % baseball_damage_skill if i == 0 else "+2 maximum health • Rank %d" % baseball_health_skill
+		draw_string(ThemeDB.fallback_font, node_rect.position + Vector2(18, 30), label, HORIZONTAL_ALIGNMENT_LEFT, node_rect.size.x - 36.0, 19, Color.WHITE)
+		draw_string(ThemeDB.fallback_font, node_rect.position + Vector2(18, 57), detail, HORIZONTAL_ALIGNMENT_LEFT, node_rect.size.x - 36.0, 15, accent)
+
 func _survivor_info_close_rect() -> Rect2:
 	return Rect2(Vector2(234, size.y - 168), Vector2(36, 36))
 
@@ -2034,11 +2190,12 @@ func _draw_survivor_info_panel() -> void:
 		Color.WHITE
 	)
 	var status := "RELOADING" if is_reloading else "%d / %d" % [ammo, MAGAZINE_SIZE]
-	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 52), "POLICE • ACCURACY %d%%" % int(COP_ACCURACY * 100.0), HORIZONTAL_ALIGNMENT_LEFT, 145, 14, Color("#83c7ff"))
+	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 52), "POLICE • ACCURACY %d%%" % int(_cop_accuracy() * 100.0), HORIZONTAL_ALIGNMENT_LEFT, 145, 14, Color("#83c7ff"))
 	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 74), "LEVEL   %d  XP %d/%d" % [cop_level, cop_xp, cop_xp_to_next], HORIZONTAL_ALIGNMENT_LEFT, 150, 15, Color.WHITE)
 	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 96), "HEALTH  %d / %d" % [survivor_health, survivor_max_health], HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
 	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 118), "AMMO    %s" % status, HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
 	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 140), "KILLS   %d" % cop_kills, HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
+	_draw_skill_up_button(cop_skill_points)
 
 func _draw_baseball_info_panel() -> void:
 	var panel_size := Vector2(260, 158)
@@ -2056,3 +2213,4 @@ func _draw_baseball_info_panel() -> void:
 	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 96), "HEALTH  %d / %d" % [baseball_health, baseball_max_health], HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
 	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 118), "BAT DMG %.2f" % _baseball_damage(), HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
 	draw_string(ThemeDB.fallback_font, panel_position + Vector2(100, 140), "KILLS   %d" % baseball_kills, HORIZONTAL_ALIGNMENT_LEFT, 145, 15, Color.WHITE)
+	_draw_skill_up_button(baseball_skill_points)
