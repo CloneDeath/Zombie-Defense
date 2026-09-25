@@ -751,7 +751,7 @@ func _update_baseball_survivor(delta: float) -> void:
 
 	# Zone boundaries limit pursuit, not the bat itself. If a zombie reaches the
 	# batter at an edge, fight it even when its center is in the next zone.
-	var melee_target := _closest_zombie_to_baseball(BASEBALL_MELEE_METERS * TILE_SIZE)
+	var melee_target := _closest_zombie_to_baseball(BASEBALL_AOE_METERS * TILE_SIZE)
 	if not melee_target.is_empty():
 		var melee_position := _zombie_position(melee_target)
 		var melee_angle := baseball_position.angle_to_point(melee_position)
@@ -1710,7 +1710,7 @@ func _draw() -> void:
 
 	if survivor_spawn >= 0 and not survivor_evacuated:
 		var survivor_screen := _map_to_screen(survivor_position)
-		if survivor_alive and survivor_is_walking:
+		if survivor_alive and survivor_is_walking and not _point_in_deployment_zone(survivor_position, survivor_spawn):
 			var destination_screen := _map_to_screen(survivor_target)
 			var arrow_direction := survivor_screen.direction_to(destination_screen)
 			var arrow_tip := destination_screen
