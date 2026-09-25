@@ -448,14 +448,14 @@ func _update_zombies(delta: float) -> void:
 			var swarm_offset := Vector2.RIGHT.rotated(float(zombie.swarm_angle)) * float(zombie.swarm_radius)
 			var swarm_position: Vector2 = target_position + swarm_offset
 			var distance := zombie_position.distance_to(target_position)
-			var desired_angle := zombie_position.angle_to_point(target_position)
-			zombie.aim_angle = rotate_toward(zombie.aim_angle, desired_angle, ZOMBIE_TURN_SPEED * delta)
 			if distance > ZOMBIE_ATTACK_RANGE:
 				var speed: float = ZOMBIE_CHASE_SPEED * zombie.speed_multiplier * zombie.movement_factor
-				var moved_position := _move_around_car(zombie_position, swarm_position, speed * delta)
+				var moved_position := _steer_zombie_forward(zombie, zombie_position, swarm_position, speed, delta)
 				zombie.x = moved_position.x / _map_size().x
 				zombie.y = moved_position.y
 			else:
+				var desired_angle := zombie_position.angle_to_point(target_position)
+				zombie.aim_angle = rotate_toward(zombie.aim_angle, desired_angle, ZOMBIE_TURN_SPEED * delta)
 				zombie.attack_cooldown -= delta
 				if zombie.attack_cooldown <= 0.0:
 					_damage_survivor_target(target_id)
@@ -478,10 +478,8 @@ func _update_zombies(delta: float) -> void:
 					route_target = second_turn
 				else:
 					route_target = Vector2(_route_exit_x(), _lower_road_y() - path_offset)
-			var desired_angle := zombie_position.angle_to_point(route_target)
-			zombie.aim_angle = rotate_toward(zombie.aim_angle, desired_angle, ZOMBIE_TURN_SPEED * delta)
 			var route_speed: float = ZOMBIE_SPEED * _map_size().x * zombie.speed_multiplier * zombie.movement_factor
-			var moved_position := _move_around_car(zombie_position, route_target, route_speed * delta)
+			var moved_position := _steer_zombie_forward(zombie, zombie_position, route_target, route_speed, delta)
 			zombie.x = moved_position.x / _map_size().x
 			zombie.y = moved_position.y
 
@@ -495,6 +493,25 @@ func _update_zombies(delta: float) -> void:
 
 	_separate_zombies()
 	_keep_zombies_out_of_obstacles()
+
+func _steer_zombie_forward(
+	zombie: Dictionary,
+	current: Vector2,
+	target: Vector2,
+	speed: float,
+	delta: float
+) -> Vector2:
+	# Ask obstacle navigation which direction is currently clear, turn toward
+	# that direction, then move strictly forward along the zombie's facing.
+	var navigation_step := _move_around_car(current, target, maxf(1.0, speed * delta))
+	if navigation_step.distance_to(current) > 0.001:
+		var desired_angle := current.angle_to_point(navigation_step)
+		zombie.aim_angle = rotate_toward(zombie.aim_angle, desired_angle, ZOMBIE_TURN_SPEED * delta)
+	var forward := Vector2.RIGHT.rotated(float(zombie.aim_angle))
+	var next_position := current + forward * speed * delta
+	if _zombie_position_blocked(next_position):
+		return current
+	return next_position
 
 func _zombie_position_blocked(position: Vector2) -> bool:
 	var obstacles := _car_obstacle_rects(ZOMBIE_COLLISION_RADIUS)
